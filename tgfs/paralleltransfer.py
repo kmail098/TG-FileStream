@@ -1,4 +1,4 @@
-# tgfilestream - A Telegram bot that can stream Telegram files to users over HTTP.
+# TG-FileStream
 # Copyright (C) 2019 Tulir Asokan
 #
 # This program is free software: you can redistribute it and/or modify
@@ -13,30 +13,36 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Union, AsyncGenerator, AsyncContextManager, Dict, Optional, List
+
+# Modifications made by Deekshith SH, 2025
+# Copyright (C) 2025 Deekshith SH
+
+# pylint: disable=protected-access
+
+from collections import OrderedDict
+from typing import AsyncGenerator, Dict, Optional, List
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import logging
 import asyncio
 import math
 
-from telethon import TelegramClient, utils
+from telethon import TelegramClient
 from telethon.crypto import AuthKey
 from telethon.network import MTProtoSender
+from telethon.tl.alltlobjects import LAYER
+from telethon.tl.functions import InvokeWithLayerRequest
 from telethon.tl.functions.auth import ExportAuthorizationRequest, ImportAuthorizationRequest
 from telethon.tl.functions.upload import GetFileRequest
-from telethon.tl.types import (Document, InputFileLocation, InputDocumentFileLocation,
-                               InputPhotoFileLocation, InputPeerPhotoFileLocation, DcOption)
-from telethon.errors import DcIdInvalidError
+from telethon.tl.types import DcOption
+from telethon.errors import DcIdInvalidError, FloodWaitError
 
-from .config import connection_limit
-
-TypeLocation = Union[Document, InputDocumentFileLocation, InputPeerPhotoFileLocation,
-                     InputFileLocation, InputPhotoFileLocation]
+from tgfs.config import Config
+from tgfs.utils import get_fileinfo, FileInfo, InputTypeLocation
 
 root_log = logging.getLogger(__name__)
 
-if connection_limit > 25:
+if Config.CONNECTION_LIMIT > 25:
     root_log.warning("The connection limit should not be set above 25 to avoid"
                      " infinite disconnect/reconnect loops")
 
@@ -52,7 +58,6 @@ class Connection:
 class DCConnectionManager:
     log: logging.Logger
     client: TelegramClient
-    loop: asyncio.AbstractEventLoop
 
     dc_id: int
     dc: Optional[DcOption]
@@ -61,27 +66,26 @@ class DCConnectionManager:
 
     _list_lock: asyncio.Lock
 
-    def __init__(self, client: TelegramClient, dc_id: int) -> None:
-        self.log = root_log.getChild(f"dc{dc_id}")
+    def __init__(self, client: TelegramClient, dc_id: int, log: logging.Logger) -> None:
+        self.log = log.getChild(f"dc{dc_id}")
         self.client = client
         self.dc_id = dc_id
         self.auth_key = None
         self.connections = []
         self._list_lock = asyncio.Lock()
-        self.loop = client.loop
         self.dc = None
 
     async def _new_connection(self) -> Connection:
         if not self.dc:
             self.dc = await self.client._get_dc(self.dc_id)
-        sender = MTProtoSender(self.auth_key, self.loop, loggers=self.client._log)
+        sender = MTProtoSender(self.auth_key, loggers=self.client._log)
         index = len(self.connections) + 1
         conn = Connection(sender=sender, log=self.log.getChild(f"conn{index}"), lock=asyncio.Lock())
         self.connections.append(conn)
         async with conn.lock:
             conn.log.info("Connecting...")
             connection_info = self.client._connection(self.dc.ip_address, self.dc.port, self.dc.id,
-                                                      loop=self.loop, loggers=self.client._log,
+                                                      loggers=self.client._log,
                                                       proxy=self.client._proxy)
             await sender.connect(connection_info)
             if not self.auth_key:
@@ -98,9 +102,13 @@ class DCConnectionManager:
             self.auth_key = self.client.session.auth_key
             conn.sender.auth_key = self.auth_key
             return
-        req = self.client._init_with(ImportAuthorizationRequest(
+        init_request = self.client._init_request
+        init_request.query = ImportAuthorizationRequest(
             id=auth.id, bytes=auth.bytes
-        ))
+        )
+        req = InvokeWithLayerRequest(
+            LAYER, init_request
+        )
         await conn.sender.send(req)
         self.auth_key = conn.sender.auth_key
 
@@ -109,12 +117,12 @@ class DCConnectionManager:
         for conn in self.connections:
             if not best_conn or conn.users < best_conn.users:
                 best_conn = conn
-        if (not best_conn or best_conn.users > 0) and len(self.connections) < connection_limit:
+        if (not best_conn or best_conn.users > 0) and len(self.connections) < Config.CONNECTION_LIMIT:
             best_conn = await self._new_connection()
         return best_conn
 
     @asynccontextmanager
-    async def get_connection(self) -> AsyncContextManager[Connection]:
+    async def get_connection(self) -> AsyncGenerator[Connection, None]:
         async with self._list_lock:
             conn: Connection = await asyncio.shield(self._next_connection())
             # The connection is locked so reconnections don't stack
@@ -125,74 +133,113 @@ class DCConnectionManager:
         finally:
             conn.users -= 1
 
+    async def disconnect(self) -> None:
+        async with self._list_lock:
+            await asyncio.gather(*[conn.sender.disconnect() for conn in self.connections])
+
 
 class ParallelTransferrer:
-    log: logging.Logger = logging.getLogger(__name__)
+    log: logging.Logger
     client: TelegramClient
-    loop: asyncio.AbstractEventLoop
-
     dc_managers: Dict[int, DCConnectionManager]
+    users: int
+    cached_files: OrderedDict
 
-    _counter: int
-
-    def __init__(self, client: TelegramClient) -> None:
+    def __init__(self, client: TelegramClient, client_id: int) -> None:
+        self.log = root_log.getChild(f"bot{client_id}")
         self.client = client
-        self.loop = self.client.loop
-        self._counter = 0
+        self.users = 0
+        self.cached_files = OrderedDict()
         self.dc_managers = {
-            1: DCConnectionManager(client, 1),
-            2: DCConnectionManager(client, 2),
-            3: DCConnectionManager(client, 3),
-            4: DCConnectionManager(client, 4),
-            5: DCConnectionManager(client, 5),
+            1: DCConnectionManager(client, 1, self.log),
+            2: DCConnectionManager(client, 2, self.log),
+            3: DCConnectionManager(client, 3, self.log),
+            4: DCConnectionManager(client, 4, self.log),
+            5: DCConnectionManager(client, 5, self.log),
         }
 
     def post_init(self) -> None:
         self.dc_managers[self.client.session.dc_id].auth_key = self.client.session.auth_key
 
-    @property
-    def next_index(self) -> int:
-        self._counter += 1
-        return self._counter
+    async def close_connection(self) -> None:
+        task = []
+        for dcid, dcm in self.dc_managers.items():
+            if dcm.connections:
+                self.log.debug("Closing connections for DC %d", dcid)
+                task.append(dcm.disconnect())
+        if task:
+            await asyncio.gather(*task)
+        self.log.debug("All DC connections closed")
+
+    async def get_file(self, message_id: int, file_name: str) -> Optional[FileInfo]:
+        if message_id in self.cached_files:
+            # await asyncio.sleep(1) # Small deplay delay
+            return await self.cached_files[message_id]
+            # ToDo: Figure out why all connections are not closing
+        task=asyncio.create_task(get_fileinfo(self.client, message_id, file_name))
+        if Config.CACHE_SIZE is not None and len(self.cached_files) > Config.CACHE_SIZE:
+            self.cached_files.popitem(last=False)
+        self.cached_files[message_id]=task
+        file_id=await task
+        if not file_id:
+            self.cached_files.pop(message_id)
+            self.log.debug("File not found for message with ID %s", message_id)
+            return None
+        self.log.debug("Generated file ID for message with ID %s", message_id)
+        return file_id
 
     async def _int_download(self, request: GetFileRequest, first_part: int, last_part: int,
                             part_count: int, part_size: int, dc_id: int, first_part_cut: int,
                             last_part_cut: int) -> AsyncGenerator[bytes, None]:
         log = self.log
+        self.users += 1
         try:
             part = first_part
             dcm = self.dc_managers[dc_id]
             async with dcm.get_connection() as conn:
                 log = conn.log
                 while part <= last_part:
-                    result = await conn.sender.send(request)
+                    try:
+                        result = await asyncio.wait_for(conn.sender.send(request), timeout=Config.TIMEOUT_SECONDS)
+                    except FloodWaitError as e:
+                        log.info("Flood wait of %d seconds", e.seconds)
+                        await asyncio.sleep(e.seconds)
+                        result = await asyncio.wait_for(conn.sender.send(request), timeout=Config.TIMEOUT_SECONDS)
+
                     request.offset += part_size
-                    if part == first_part:
+                    if not result.bytes:
+                        break
+                    elif last_part == first_part:
+                        yield result.bytes[first_part:last_part]
+                    elif part == first_part:
                         yield result.bytes[first_part_cut:]
                     elif part == last_part:
                         yield result.bytes[:last_part_cut]
                     else:
                         yield result.bytes
-                    log.debug(f"Part {part}/{last_part} (total {part_count}) downloaded")
+                    log.debug("Part %d/%d (total %s) downloaded", part, last_part, part_count)
                     part += 1
                 log.debug("Parallel download finished")
         except (GeneratorExit, StopAsyncIteration, asyncio.CancelledError):
             log.debug("Parallel download interrupted")
             raise
+        except asyncio.TimeoutError:
+            log.debug("Parallel Download Timeout")
         except Exception:
             log.debug("Parallel download errored", exc_info=True)
+        finally:
+            self.users -= 1
 
-    def download(self, file: TypeLocation, file_size: int, offset: int, limit: int
+    def download(self, location: InputTypeLocation, dc_id: int, file_size: int, offset: int, limit: int
                  ) -> AsyncGenerator[bytes, None]:
-        dc_id, location = utils.get_input_location(file)
         part_size = 512 * 1024
         first_part_cut = offset % part_size
         first_part = math.floor(offset / part_size)
-        last_part_cut = part_size - (limit % part_size)
+        last_part_cut = (limit % part_size) + 1
         last_part = math.ceil(limit / part_size)
         part_count = math.ceil(file_size / part_size)
-        self.log.debug(f"Starting parallel download: chunks {first_part}-{last_part}"
-                       f" of {part_count} {location!s}")
+        self.log.debug("Starting parallel download: chunks %d-%d of %d %s",
+            first_part, last_part, part_count, location)
         request = GetFileRequest(location, offset=first_part * part_size, limit=part_size)
 
         return self._int_download(request, first_part, last_part, part_count, part_size, dc_id,

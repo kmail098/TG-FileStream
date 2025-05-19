@@ -18,6 +18,7 @@ import logging
 from urllib import parse
 
 from telethon import events
+from telethon.custom import Message
 
 from tgfs.config import Config
 from tgfs.telegram import client
@@ -31,6 +32,7 @@ async def handle_text_message(evt: events.NewMessage.Event) -> None:
 
 @client.on(events.NewMessage(func=lambda x: x.is_private and x.file))
 async def handle_file_message(evt: events.NewMessage.Event) -> None:
-    url = f"{Config.PUBLIC_URL}/{evt.chat_id}/{evt.message.id}/{parse.quote(get_filename(evt))}"
+    fwd_msg: Message = await evt.message.forward_to(Config.BIN_CHANNEL)
+    url = f"{Config.PUBLIC_URL}/{fwd_msg.id}/{parse.quote(get_filename(evt))}"
     await evt.reply(url)
     log.info("Generated Link %s", url)

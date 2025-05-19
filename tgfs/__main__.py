@@ -22,7 +22,7 @@ from telethon import functions
 
 from tgfs.log import log
 from tgfs.config import Config
-from tgfs.telegram import client, load_plugins, transfer
+from tgfs.telegram import client, load_plugins, start_clients, multi_clients
 from tgfs.routes import routes
 
 app = web.Application()
@@ -41,6 +41,7 @@ async def start() -> None:
                 option.id, option.ip_address, option.port)
             client.session.save()
             break
+    await start_clients()
     await runner.setup()
     await web.TCPSite(runner, Config.HOST, Config.PORT).start()
     me = await client.get_me()
@@ -53,8 +54,8 @@ async def stop() -> None:
     log.debug("Stopping HTTP Server")
     await runner.cleanup()
     log.debug("Closing Telegram Client and Connections")
-    await client.disconnect()
-    await transfer.close_senders()
+    # await client.disconnect()
+    await asyncio.gather(*[func for client in multi_clients.values() for func in (client.close_connection(), client.client.disconnect())])
     log.info("Stopped Bot and Server")
 
 async def main() -> None:

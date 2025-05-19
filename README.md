@@ -48,6 +48,7 @@ Store the required environment variables in a `.env` file:
 API_ID=1234567
 API_HASH=1a2b3c4d5e6f7g8h9i0jklmnopqrstuv
 BOT_TOKEN=1234567890:AAExampleBotTokenGeneratedHere
+BIN_CHANNEL=-1002605638795
 HOST=0.0.0.0
 PORT=8080
 PUBLIC_URL=http://127.0.0.1:8080
@@ -63,14 +64,28 @@ python3 -m tgfs
 
 ## ⚙️ Environment Variables
 
-| Variable     | Required | Description                                                |
-|--------------|----------|------------------------------------------------------------|
-| `API_ID`     | ✅       | App ID from [my.telegram.org](https://my.telegram.org)     |
-| `API_HASH`   | ✅       | API Hash from [my.telegram.org](https://my.telegram.org)   |
-| `BOT_TOKEN`  | ✅       | Bot token from [@BotFather](https://t.me/BotFather)        |
-| `HOST`       | ❌       | Host to bind the server (default: `0.0.0.0`)               |
-| `PORT`       | ❌       | Port to run the server on (default: `8080`)                |
-| `PUBLIC_URL` | ❌       | Public-facing URL used to generate download links          |
+| Variable          | Required | Description                                                                  |
+|-------------------|----------|------------------------------------------------------------------------------|
+| `API_ID`          | ✅       | App ID from [my.telegram.org](https://my.telegram.org)                       |
+| `API_HASH`        | ✅       | API Hash from [my.telegram.org](https://my.telegram.org)                     |
+| `BOT_TOKEN`       | ✅       | Bot token from [@BotFather](https://t.me/BotFather)                          |
+| `BIN_CHANNEL`     | ✅       | Channel ID where files sent to bot are sent                                  |
+| `HOST`            | ❌       | Host to bind the server (default: `0.0.0.0`)                                 |
+| `PORT`            | ❌       | Port to run the server on (default: `8080`)                                  |
+| `PUBLIC_URL`      | ❌       | Public-facing URL used to generate download links                            |
+| `CONNECTION_LIMIT`| ❌       | No of Connection to create for a single DC per client                        |
+| `CACHE_SIZE`      | ❌       | No of File Info to cache                                                     |
+| `TIMEOUT_SECONDS` | ❌       | No of Seconds to wait after sending GetFileRequest before closing connection |
+
+
+- `MULTI_TOKENx`: Use Multiple Telegram Clients when downloading files to avoid flood wait, Replace x with Number
+
+example:
+```
+MULTI_TOKEN1=1234567890:AAExampleBotTokenGeneratedHere
+MULTI_TOKEN2=0987654321:AAExampleBotTokenGeneratedHere
+MULTI_TOKEN3=5432167890:AAExampleBotTokenGeneratedHere
+```
 
 ---
 
@@ -81,7 +96,7 @@ Once the server is running, you can:
 - Access Telegram media files via HTTP:
 
 ```
-http://{PUBLIC_URL}/{chat_id}/{message_id}/{filename}
+http://{PUBLIC_URL}/{message_id}/{filename}
 ```
 
 - Or simply send a file to your bot, and it will respond with a download link.

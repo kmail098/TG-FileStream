@@ -15,44 +15,28 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
-from typing import Optional, Union, cast
 from aiohttp import web
-from telethon.utils import get_input_location
-from telethon.tl.custom import Message
-from telethon.tl.types import InputPeerUser, Photo, Document
 
-from tgfs.cache_util import lru_cache
-from tgfs.streamer import InputTypeLocation
-from tgfs.telegram import client, transfer
-from tgfs.utils import get_filename, FileInfo
+from tgfs.telegram import multi_clients
+from tgfs.utils import FileInfo
 
 log = logging.getLogger(__name__)
 routes = web.RouteTableDef()
 
-@lru_cache(128)
-async def get_file(chat_id: int, msg_id: int, expected_name: str) -> Optional[FileInfo]:
-    peer = InputPeerUser(user_id=chat_id, access_hash=0)
-    message = cast(Message, await client.get_messages(entity=peer, ids=msg_id))
-    if not message or not message.file or get_filename(message) != expected_name:
-        return None
+@routes.get("/")
+async def handle_root(req: web.Request):
+    return web.json_response({key: val.users for key, val in multi_clients.items()})
 
-    media: InputTypeLocation = message.media
-    file: Union[Photo, Document] = getattr(media, "document", None) or getattr(media, "photo", None)
-    return FileInfo(
-        message.file.size,
-        message.file.mime_type,
-        expected_name,
-        file.id,
-        *get_input_location(media)
-    )
-
-@routes.get(r"/{chat_id:-?\d+}/{msg_id:-?\d+}/{name}")
+@routes.get(r"/{msg_id:-?\d+}/{name}")
 async def handle_file_request(req: web.Request) -> web.Response:
     head: bool = req.method == "HEAD"
-    chat_id = int(req.match_info["chat_id"])
     msg_id = int(req.match_info["msg_id"])
     file_name = req.match_info["name"]
-    file: FileInfo = await get_file(chat_id, msg_id, file_name)
+
+    client_id = min(multi_clients, key=lambda k: multi_clients[k].users)
+    transfer = multi_clients[client_id]
+
+    file: FileInfo = await transfer.get_file(msg_id, file_name)
     if not file:
         return web.Response(status=404, text="404: Not Found")
 

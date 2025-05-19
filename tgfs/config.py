@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from os import environ
+from typing import List
 
 try:
     from dotenv import load_dotenv
@@ -22,11 +23,30 @@ try:
 except ImportError:
     print("Warning: python-dotenv not installed. Skipping .env loading.")
 
+def get_multi_client_tokens() -> List[int]:
+    prefix = "MULTI_TOKEN"
+    tokens = []
+    for key in environ:
+        if key.startswith(prefix):
+            suffix = key[len(prefix):]
+            if suffix.isdigit():
+                tokens.append((int(suffix), environ[key]))
+
+    if tokens:
+        tokens.sort(key=lambda x: x[0])
+
+    return [token for _, token in tokens]
+
 class Config:
     API_ID: int = int(environ["API_ID"])
     API_HASH: str = environ["API_HASH"]
     BOT_TOKEN: str = environ["BOT_TOKEN"]
+    BIN_CHANNEL: int = int(environ["BIN_CHANNEL"])
     HOST: str = environ.get("HOST", "0.0.0.0")
     PORT: int = environ.get("PORT", 8080)
     PUBLIC_URL: str = environ.get("PUBLIC_URL", f"http://{HOST}:{PORT}")
-    DEBUG: bool = True
+    DEBUG: bool = bool(environ.get("DEBUG", None))
+    CONNECTION_LIMIT: int = int(environ.get("CONNECTION_LIMIT", 20))
+    TOKENS: List[str] = get_multi_client_tokens()
+    CACHE_SIZE: int = int(environ.get("CACHE_SIZE", 128))
+    TIMEOUT_SECONDS: int = int(environ.get("TIMEOUT_SECONDS", 10))
