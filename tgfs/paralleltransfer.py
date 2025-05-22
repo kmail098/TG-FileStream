@@ -19,6 +19,7 @@
 
 # pylint: disable=protected-access
 
+import copy
 from collections import OrderedDict
 from typing import AsyncGenerator, Dict, Optional, List
 from contextlib import asynccontextmanager
@@ -80,7 +81,8 @@ class DCConnectionManager:
             self.dc = await self.client._get_dc(self.dc_id)
         sender = MTProtoSender(self.auth_key, loggers=self.client._log)
         index = len(self.connections) + 1
-        conn = Connection(sender=sender, log=self.log.getChild(f"conn{index}"), lock=asyncio.Lock())
+        conn = Connection(sender=sender, log=self.log.getChild(
+            f"conn{index}"), lock=asyncio.Lock())
         self.connections.append(conn)
         async with conn.lock:
             conn.log.info("Connecting...")
@@ -102,7 +104,7 @@ class DCConnectionManager:
             self.auth_key = self.client.session.auth_key
             conn.sender.auth_key = self.auth_key
             return
-        init_request = self.client._init_request
+        init_request = copy.copy(self.client._init_request)
         init_request.query = ImportAuthorizationRequest(
             id=auth.id, bytes=auth.bytes
         )
@@ -143,12 +145,14 @@ class ParallelTransferrer:
     client: TelegramClient
     dc_managers: Dict[int, DCConnectionManager]
     users: int
+    active_clients: int
     cached_files: OrderedDict
 
     def __init__(self, client: TelegramClient, client_id: int) -> None:
         self.log = root_log.getChild(f"bot{client_id}")
         self.client = client
         self.users = 0
+        self.active_clients = 0
         self.cached_files = OrderedDict()
         self.dc_managers = {
             1: DCConnectionManager(client, 1, self.log),
@@ -173,14 +177,13 @@ class ParallelTransferrer:
 
     async def get_file(self, message_id: int, file_name: str) -> Optional[FileInfo]:
         if message_id in self.cached_files:
-            # await asyncio.sleep(1) # Small deplay delay
             return await self.cached_files[message_id]
-            # ToDo: Figure out why all connections are not closing
-        task=asyncio.create_task(get_fileinfo(self.client, message_id, file_name))
+        task = asyncio.create_task(get_fileinfo(
+            self.client, message_id, file_name))
         if Config.CACHE_SIZE is not None and len(self.cached_files) > Config.CACHE_SIZE:
             self.cached_files.popitem(last=False)
-        self.cached_files[message_id]=task
-        file_id=await task
+        self.cached_files[message_id] = task
+        file_id = await task
         if not file_id:
             self.cached_files.pop(message_id)
             self.log.debug("File not found for message with ID %s", message_id)
@@ -189,8 +192,8 @@ class ParallelTransferrer:
         return file_id
 
     async def _int_download(self, request: GetFileRequest, first_part: int, last_part: int,
-                            part_count: int, part_size: int, dc_id: int, first_part_cut: int,
-                            last_part_cut: int) -> AsyncGenerator[bytes, None]:
+        part_count: int, part_size: int, dc_id: int, first_part_cut: int,
+        last_part_cut: int) -> AsyncGenerator[bytes, None]:
         log = self.log
         self.users += 1
         try:
@@ -199,17 +202,13 @@ class ParallelTransferrer:
             async with dcm.get_connection() as conn:
                 log = conn.log
                 while part <= last_part:
-                    try:
-                        result = await asyncio.wait_for(conn.sender.send(request), timeout=Config.TIMEOUT_SECONDS)
-                    except FloodWaitError as e:
-                        log.info("Flood wait of %d seconds", e.seconds)
-                        await asyncio.sleep(e.seconds)
-                        result = await asyncio.wait_for(conn.sender.send(request), timeout=Config.TIMEOUT_SECONDS)
+                    result = await self.client._call(conn.sender, request)
 
-                    request.offset += part_size
                     if not result.bytes:
                         break
-                    elif last_part == first_part:
+
+                    request.offset += part_size
+                    if last_part == first_part:
                         yield result.bytes[first_part:last_part]
                     elif part == first_part:
                         yield result.bytes[first_part_cut:]
@@ -217,29 +216,28 @@ class ParallelTransferrer:
                         yield result.bytes[:last_part_cut]
                     else:
                         yield result.bytes
-                    log.debug("Part %d/%d (total %s) downloaded", part, last_part, part_count)
+                    log.debug("Part %d/%d (total %d) downloaded", part, last_part, part_count)
                     part += 1
                 log.debug("Parallel download finished")
         except (GeneratorExit, StopAsyncIteration, asyncio.CancelledError):
             log.debug("Parallel download interrupted")
             raise
-        except asyncio.TimeoutError:
-            log.debug("Parallel Download Timeout")
         except Exception:
             log.debug("Parallel download errored", exc_info=True)
         finally:
+            self.active_clients -= 1
             self.users -= 1
 
     def download(self, location: InputTypeLocation, dc_id: int, file_size: int, offset: int, limit: int
                  ) -> AsyncGenerator[bytes, None]:
-        part_size = 512 * 1024
+        part_size = Config.DOWNLOAD_PART_SIZE
         first_part_cut = offset % part_size
         first_part = math.floor(offset / part_size)
         last_part_cut = (limit % part_size) + 1
         last_part = math.ceil(limit / part_size)
         part_count = math.ceil(file_size / part_size)
         self.log.debug("Starting parallel download: chunks %d-%d of %d %s",
-            first_part, last_part, part_count, location)
+                       first_part, last_part, part_count, location)
         request = GetFileRequest(location, offset=first_part * part_size, limit=part_size)
 
         return self._int_download(request, first_part, last_part, part_count, part_size, dc_id,

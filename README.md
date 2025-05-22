@@ -1,5 +1,8 @@
 # TG-FileStream
 
+> This project is released under the **GNU AGPL v3** license.  
+> You are free to use, modify, and distribute it — as long as you share your changes under the same license.
+
 **TG-FileStream** is a lightweight web server and Telegram client that acts as a proxy between Telegram servers and HTTP clients, allowing direct downloads of Telegram media files via HTTP.
 
 ---
@@ -64,18 +67,20 @@ python3 -m tgfs
 
 ## ⚙️ Environment Variables
 
-| Variable          | Required | Description                                                                  |
-|-------------------|----------|------------------------------------------------------------------------------|
-| `API_ID`          | ✅       | App ID from [my.telegram.org](https://my.telegram.org)                       |
-| `API_HASH`        | ✅       | API Hash from [my.telegram.org](https://my.telegram.org)                     |
-| `BOT_TOKEN`       | ✅       | Bot token from [@BotFather](https://t.me/BotFather)                          |
-| `BIN_CHANNEL`     | ✅       | Channel ID where files sent to bot are sent                                  |
-| `HOST`            | ❌       | Host to bind the server (default: `0.0.0.0`)                                 |
-| `PORT`            | ❌       | Port to run the server on (default: `8080`)                                  |
-| `PUBLIC_URL`      | ❌       | Public-facing URL used to generate download links                            |
-| `CONNECTION_LIMIT`| ❌       | No of Connection to create for a single DC per client                        |
-| `CACHE_SIZE`      | ❌       | No of File Info to cache                                                     |
-| `TIMEOUT_SECONDS` | ❌       | No of Seconds to wait after sending GetFileRequest before closing connection |
+| Variable             | Required/Default       | Description                                                                  |
+| -------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `API_ID`             | ✅                     | App ID from [my.telegram.org](https://my.telegram.org)                       |
+| `API_HASH`           | ✅                     | API hash from [my.telegram.org](https://my.telegram.org)                     |
+| `BOT_TOKEN`          | ✅                     | Bot token from [@BotFather](https://t.me/BotFather)                          |
+| `BIN_CHANNEL`        | ✅                     | Channel ID where files sent to the bot are stored                            |
+| `HOST`               | `0.0.0.0`              | Host address to bind the server (default: `0.0.0.0`)                         |
+| `PORT`               | `8080`                 | Port to run the server on (default: `8080`)                                  |
+| `PUBLIC_URL`         | `https://0.0.0.0:8080` | Public-facing URL used to generate download links                            |
+| `CONNECTION_LIMIT`   | `20`                   | Number of connections to create per DC for a single client                   |
+| `CACHE_SIZE`         | `128`                  | Number of file info objects to cache                                         |
+| `DOWNLOAD_PART_SIZE` | `1048576 (1MB)`        | Number of bytes to request in a single chunk                                 |
+| `NO_UPDATE`          | `False`                | Whether to reply to messages sent to the bot (True to disable replies)       |
+
 
 
 - `MULTI_TOKENx`: Use Multiple Telegram Clients when downloading files to avoid flood wait, Replace x with Number
@@ -105,9 +110,42 @@ This will stream the file directly from Telegram servers to the client.
 
 ---
 
+## 🛠️ Contributing & Reporting Issues
+
+Found a bug or have a feature request? Please [open an issue](https://github.com/DeekshithSH/TG-FileStream/issues) on GitHub.
+
+### 🐞 Reporting Issues
+When reporting a bug, **please include**:
+- Steps to reproduce the issue
+- Expected behavior vs actual behavior
+- Relevant logs, screenshots, or error messages (if any)
+- Environment details (OS, Python version, etc.)
+
+**Example issue title:**  
+`[Bug] Download fails for large files`
+
+### 💡 Requesting Features
+When suggesting a new feature, **please include**:
+- A clear and concise description of the feature
+- The motivation or use case for it
+- Expected behavior (input/output examples if applicable)
+- Any alternatives you've considered
+
+**Example feature title:**  
+`[Feature] Add support for download progress feedback`
+
+---
+
+Contributions are welcome!  
+Feel free to fork the project and open a pull request.
+
+> 🔍 **Note:** Make sure to test your code thoroughly before submitting a PR to help maintain stability and performance.
+
+---
+
 ## 💡 Credits
 
-- **Deekshith SH** – Me (aka **SpringsFern**, **GatheredAtom696**)
+- **Deekshith SH** – Me
 - **Tulir** – Original author of [`tgfilestream`](https://github.com/tulir/tgfilestream), whose code inspired this project and is referenced in `paralleltransfer.py`
 
 ---
