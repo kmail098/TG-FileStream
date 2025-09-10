@@ -1,4 +1,2 @@
-telethon
-aiohttp
-python-dotenv
-cryptg
+flask
+python-telegram-bot==13.15
