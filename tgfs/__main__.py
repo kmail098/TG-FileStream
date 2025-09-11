@@ -20,9 +20,9 @@ dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
 # ======== المستخدمين والصلاحيات ========
 ALLOWED_USERS_FILE = "allowed_users.txt"
-ADMIN_ID = 7485195087  # معرفك أنت المسؤول
+ADMIN_ID = 7485195087
 PUBLIC_MODE = False
-activity_log = []  # سجل النشاطات
+activity_log = []
 user_files = {}  # {user_id: [file_ids]}
 
 def load_allowed_users():
@@ -43,7 +43,7 @@ def is_allowed_user(update):
         return True
     return update.message.from_user.id in allowed_users
 
-# ======== روابط الملفات المؤقتة ========
+# ======== روابط الملفات المؤقتة مع عداد وقت متبقي ========
 temporary_links = {}  # {file_id: expire_time}
 
 # ======== دوال المساعدة ========
@@ -75,18 +75,20 @@ def generate_qr(url):
     bio.seek(0)
     return bio
 
-# ======== /start ========
+# ======== /start مع لوحة المستخدم ========
 def start(update, context):
     user_id = update.message.from_user.id
     if not is_allowed_user(update):
         update.message.reply_text("❌ ليس لديك صلاحية استخدام البوت.")
         return
 
-    text = "<b>✅ البوت جاهز للعمل!</b>\n"
+    # نص جذاب للواجهة
+    text = "<b>🤖 أهلاً بك في البوت الاحترافي!</b>\n"
     text += "<i>جميع الملفات صالحة لمدة 24 ساعة فقط.</i>\n"
     if PUBLIC_MODE:
         text += "\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت."
 
+    # لوحة المسؤول
     if user_id == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on"),
@@ -99,10 +101,21 @@ def start(update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
-        # لوحة المستخدم العادي
-        update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        # لوحة المستخدم العادي مع الملفات الأخيرة
+        user_recent_files = user_files.get(user_id, [])
+        files_text = ""
+        if user_recent_files:
+            for fid in user_recent_files[-5:]:
+                remaining = int((temporary_links[fid] - datetime.now()).total_seconds() / 3600)
+                files_text += f"- <a href='{PUBLIC_URL}/get_file/{fid}'>ملف</a> | متبقي: {remaining} ساعة\n"
+        else:
+            files_text = "لا توجد ملفات بعد."
+        keyboard = [[InlineKeyboardButton("رفع ملف جديد", callback_data="upload_file")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text(text + "\n📂 آخر الملفات الخاصة بك:\n" + files_text,
+                                  reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-# ======== رفع الملفات ========
+# ======== رفع الملفات مع دعم الملفات الكبيرة وتحذيرات ========
 def handle_file(update, context):
     if not is_allowed_user(update):
         update.message.reply_text("❌ ليس لديك صلاحية رفع الملفات.")
@@ -110,23 +123,31 @@ def handle_file(update, context):
 
     msg = update.message
     file_id = None
+    file_size = 0
 
     try:
         if msg.photo:
             sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=msg.photo[-1].file_id)
             file_id = sent.photo[-1].file_id
+            file_size = msg.photo[-1].file_size
         elif msg.video:
             sent = bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
             file_id = sent.video.file_id
+            file_size = msg.video.file_size
         elif msg.audio:
             sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=msg.audio.file_id)
             file_id = sent.audio.file_id
+            file_size = msg.audio.file_size
         elif msg.document:
             sent = bot.send_document(chat_id=BIN_CHANNEL, document=msg.document.file_id)
             file_id = sent.document.file_id
+            file_size = msg.document.file_size
         else:
             update.message.reply_text("❌ لم يتم التعرف على الملف.")
             return
+
+        if file_size > 100*1024*1024:
+            update.message.reply_text("⚠️ الملف كبير جدًا (>100MB)، قد يستغرق رفعه وقت أطول.")
 
         expire_time = datetime.now() + timedelta(hours=24)
         temporary_links[file_id] = expire_time
@@ -208,7 +229,7 @@ def handle_text(update, context):
 
     context.user_data['action'] = None
 
-# ======== مسار التحميل / المشاهدة ========
+# ======== مسار التحميل / المشاهدة مع عداد الوقت ========
 @app.route("/get_file/<file_id>", methods=["GET"])
 def get_file(file_id):
     try:
@@ -221,6 +242,7 @@ def get_file(file_id):
 
         file = bot.get_file(file_id)
         file_url = file.file_path
+        remaining_hours = int((temporary_links[file_id] - datetime.now()).total_seconds() / 3600)
 
         if file.file_path.endswith(('.mp4', '.mkv', '.mov', '.webm')):
             html_content = f"""
@@ -230,12 +252,13 @@ def get_file(file_id):
               <source src="{file_url}" type="video/mp4">
               المتصفح لا يدعم الفيديو.
             </video>
+            <p>⏳ متبقي {remaining_hours} ساعة على الرابط</p>
             </body>
             </html>
             """
             return html_content, 200
         else:
-            return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a>", 200
+            return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a> | ⏳ متبقي {remaining_hours} ساعة", 200
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
@@ -260,4 +283,4 @@ dispatcher.add_handler(CommandHandler("start", start))
 # ======== تشغيل التطبيق ========
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 3000))
-    app.run(host="0.0.0.0
+    app.run(host="0.0.0.0", port=port)
