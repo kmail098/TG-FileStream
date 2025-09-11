@@ -23,22 +23,39 @@ def start(update, context):
 
 dispatcher.add_handler(CommandHandler("start", start))
 
-# ======== استقبال الملفات ========
+# ======== استقبال الملفات والفيديوهات والصور ========
 def handle_file(update, context):
-    file = update.message.document or update.message.video or update.message.audio or update.message.photo[-1]
+    msg = update.message
+    file_id = None
 
-    if file:
-        # رفع الملف للقناة الخاصة
-        sent = context.bot.send_document(chat_id=BIN_CHANNEL, document=file.file_id)
+    # الصور
+    if msg.photo:
+        sent = context.bot.send_photo(chat_id=BIN_CHANNEL, photo=msg.photo[-1].file_id)
+        file_id = sent.photo[-1].file_id
 
-        # إنشاء رابط تحميل/مشاهدة مباشر
+    # الفيديو
+    elif msg.video:
+        sent = context.bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
+        file_id = sent.video.file_id
+
+    # الصوت
+    elif msg.audio:
+        sent = context.bot.send_audio(chat_id=BIN_CHANNEL, audio=msg.audio.file_id)
+        file_id = sent.audio.file_id
+
+    # ملفات أخرى
+    elif msg.document:
+        sent = context.bot.send_document(chat_id=BIN_CHANNEL, document=msg.document.file_id)
         file_id = sent.document.file_id
-        link = f"{PUBLIC_URL}/get_file/{file_id}"
 
-        # إرسال الرابط للمستخدم
-        update.message.reply_text(f"📎 رابط الملف:\n{link}")
+    # لا يوجد ملف
     else:
         update.message.reply_text("❌ لم يتم التعرف على الملف.")
+        return
+
+    # رابط التحميل/المشاهدة
+    link = f"{PUBLIC_URL}/get_file/{file_id}"
+    update.message.reply_text(f"📎 رابط الملف:\n{link}")
 
 dispatcher.add_handler(MessageHandler(Filters.document | Filters.video | Filters.audio | Filters.photo, handle_file))
 
