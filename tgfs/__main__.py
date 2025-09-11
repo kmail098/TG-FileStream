@@ -52,7 +52,7 @@ def add_user(update, context):
         return
 
     if len(context.args) != 1:
-        update.message.reply_text("❌ الاستخدام: /adduser <USER_ID>")
+        update.message.reply_text("🔻🔻 الاستخدام: /adduser <USER_ID>")
         return
 
     try:
