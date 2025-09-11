@@ -1,5 +1,5 @@
 import os
-from flask import Flask
+from flask import Flask, request
 from telegram import Bot, Update
 from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters
 from telegram.utils.request import Request
@@ -68,6 +68,18 @@ def get_file(file_id):
 
     except Exception as e:
         return f"حدث خطأ: {e}", 400
+
+# ======== مسار / Webhook ========
+@app.route("/", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return "OK", 200
+
+# ======== مسار اختبار Flask ========
+@app.route("/test", methods=["GET"])
+def test():
+    return "Flask يعمل على Vercel ✅", 200
 
 # ======== نقطة الدخول ========
 if __name__ == "__main__":
