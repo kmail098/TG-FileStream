@@ -4,6 +4,8 @@ from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, Pa
 from telegram.ext import Dispatcher, MessageHandler, Filters, CallbackQueryHandler, CommandHandler
 from telegram.utils.request import Request
 from datetime import datetime, timedelta
+import qrcode
+from io import BytesIO
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -19,8 +21,9 @@ dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 # ======== المستخدمين والصلاحيات ========
 ALLOWED_USERS_FILE = "allowed_users.txt"
 ADMIN_ID = 7485195087  # معرفك أنت المسؤول
-PUBLIC_MODE = False  # False = محدود، True = عام
+PUBLIC_MODE = False
 activity_log = []  # سجل النشاطات
+user_files = {}  # {user_id: [file_ids]}
 
 def load_allowed_users():
     if not os.path.exists(ALLOWED_USERS_FILE):
@@ -61,6 +64,17 @@ def remove_user(user_id):
 def log_activity(msg):
     activity_log.append(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
 
+# ======== إنشاء QR Code ========
+def generate_qr(url):
+    qr = qrcode.QRCode(version=1, box_size=5, border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill="black", back_color="white")
+    bio = BytesIO()
+    img.save(bio, format="PNG")
+    bio.seek(0)
+    return bio
+
 # ======== /start ========
 def start(update, context):
     user_id = update.message.from_user.id
@@ -75,16 +89,17 @@ def start(update, context):
 
     if user_id == ADMIN_ID:
         keyboard = [
-            [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on")],
-            [InlineKeyboardButton("🔒 إيقاف Public Mode", callback_data="public_off")],
-            [InlineKeyboardButton("➕ إضافة مستخدم", callback_data="add_user")],
-            [InlineKeyboardButton("➖ إزالة مستخدم", callback_data="remove_user")],
-            [InlineKeyboardButton("📋 قائمة المستخدمين", callback_data="list_users")],
-            [InlineKeyboardButton("📝 سجل النشاطات", callback_data="activity_log")]
+            [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on"),
+             InlineKeyboardButton("🔒 إيقاف Public Mode", callback_data="public_off")],
+            [InlineKeyboardButton("➕ إضافة مستخدم", callback_data="add_user"),
+             InlineKeyboardButton("➖ إزالة مستخدم", callback_data="remove_user")],
+            [InlineKeyboardButton("📋 قائمة المستخدمين", callback_data="list_users"),
+             InlineKeyboardButton("📝 سجل النشاطات", callback_data="activity_log")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
+        # لوحة المستخدم العادي
         update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 # ======== رفع الملفات ========
@@ -115,14 +130,17 @@ def handle_file(update, context):
 
         expire_time = datetime.now() + timedelta(hours=24)
         temporary_links[file_id] = expire_time
+        user_files.setdefault(msg.from_user.id, []).append(file_id)
+
         file_url = f"{PUBLIC_URL}/get_file/{file_id}"
+        qr_image = generate_qr(file_url)
 
         keyboard = [[
             InlineKeyboardButton("📥 تحميل الملف", url=file_url),
             InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url)
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text(f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
+        update.message.reply_photo(qr_image, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
         log_activity(f"User {msg.from_user.id} رفع ملف {file_id}")
 
     except Exception as e:
@@ -141,25 +159,25 @@ def button_handler(update, context):
         PUBLIC_MODE = False
         query.edit_message_text("✅ تم إيقاف الوضع العام.")
     elif query.data == "add_user":
-        query.edit_message_text("📌 أرسل معرف المستخدم الجديد بعد هذا الرسالة.")
+        query.edit_message_text("📌 أرسل معرف المستخدم الجديد بعد هذه الرسالة.")
         context.user_data['action'] = 'add_user'
     elif query.data == "remove_user":
-        query.edit_message_text("📌 أرسل معرف المستخدم المراد حذفه بعد هذا الرسالة.")
+        query.edit_message_text("📌 أرسل معرف المستخدم المراد حذفه بعد هذه الرسالة.")
         context.user_data['action'] = 'remove_user'
     elif query.data == "list_users":
         if allowed_users:
             users_text = "\n".join(str(uid) for uid in allowed_users)
-            query.edit_message_text(f"📋 قائمة المستخدمين المصرح لهم:\n{users_text}")
+            query.edit_message_text(f"📋 قائمة المستخدمين:\n{users_text}")
         else:
             query.edit_message_text("⚠️ لا يوجد أي مستخدم مصرح له حالياً.")
     elif query.data == "activity_log":
         if activity_log:
-            logs = "\n".join(activity_log[-20:])  # آخر 20 عملية
+            logs = "\n".join(activity_log[-20:])
             query.edit_message_text(f"📝 سجل النشاطات (آخر 20):\n{logs}")
         else:
             query.edit_message_text("⚠️ لا توجد أي نشاطات حتى الآن.")
 
-# ======== التعامل مع إضافة/حذف المستخدم بعد كتابة الـ ID ========
+# ======== التعامل مع إدخال المعرف ========
 def handle_text(update, context):
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
@@ -242,4 +260,4 @@ dispatcher.add_handler(CommandHandler("start", start))
 # ======== تشغيل التطبيق ========
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 3000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0
