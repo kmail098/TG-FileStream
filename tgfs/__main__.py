@@ -103,17 +103,19 @@ def start(update, context):
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
         user_recent_files = user_files.get(user_id, [])
-        files_text = ""
         if user_recent_files:
             for fid in user_recent_files[-5:]:
                 remaining = get_time_left(temporary_links.get(fid))
-                files_text += f"- <a href='{PUBLIC_URL}/get_file/{fid}'>ملف</a> | متبقي: {remaining}\n"
+                file_url = f"{PUBLIC_URL}/get_file/{fid}"
+                keyboard = [[
+                    InlineKeyboardButton("📥 تحميل الملف", url=file_url),
+                    InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url),
+                    InlineKeyboardButton(f"⏳ {remaining}", callback_data="time_left_disabled")
+                ]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                update.message.reply_text(f"ملف #{fid}", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         else:
-            files_text = "لا توجد ملفات بعد."
-        keyboard = [[InlineKeyboardButton("رفع ملف جديد", callback_data="upload_file")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text(text + "\n📂 آخر الملفات الخاصة بك:\n" + files_text,
-                                  reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            update.message.reply_text("لا توجد ملفات بعد.")
 
 # ======== رفع الملفات ========
 def handle_file(update, context):
@@ -155,10 +157,12 @@ def handle_file(update, context):
 
         file_url = f"{PUBLIC_URL}/get_file/{file_id}"
         qr_image = generate_qr(file_url)
+        remaining = get_time_left(expire_time)
 
         keyboard = [[
             InlineKeyboardButton("📥 تحميل الملف", url=file_url),
-            InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url)
+            InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url),
+            InlineKeyboardButton(f"⏳ {remaining}", callback_data="time_left_disabled")
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_photo(qr_image, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
