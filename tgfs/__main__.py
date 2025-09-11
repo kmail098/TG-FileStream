@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 import qrcode
 from io import BytesIO
 
+# ✅ استدعاء ملف الميزة
+from utils.timeleft import get_time_left
+
 # ======== إعداد Flask ========
 app = Flask(__name__)
 
@@ -82,13 +85,11 @@ def start(update, context):
         update.message.reply_text("❌ ليس لديك صلاحية استخدام البوت.")
         return
 
-    # نص جذاب للواجهة
     text = "<b>🤖 أهلاً بك في البوت الاحترافي!</b>\n"
     text += "<i>جميع الملفات صالحة لمدة 24 ساعة فقط.</i>\n"
     if PUBLIC_MODE:
         text += "\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت."
 
-    # لوحة المسؤول
     if user_id == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on"),
@@ -101,13 +102,12 @@ def start(update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
-        # لوحة المستخدم العادي مع الملفات الأخيرة
         user_recent_files = user_files.get(user_id, [])
         files_text = ""
         if user_recent_files:
             for fid in user_recent_files[-5:]:
-                remaining = int((temporary_links[fid] - datetime.now()).total_seconds() / 3600)
-                files_text += f"- <a href='{PUBLIC_URL}/get_file/{fid}'>ملف</a> | متبقي: {remaining} ساعة\n"
+                remaining = get_time_left(temporary_links.get(fid))
+                files_text += f"- <a href='{PUBLIC_URL}/get_file/{fid}'>ملف</a> | متبقي: {remaining}\n"
         else:
             files_text = "لا توجد ملفات بعد."
         keyboard = [[InlineKeyboardButton("رفع ملف جديد", callback_data="upload_file")]]
@@ -115,7 +115,7 @@ def start(update, context):
         update.message.reply_text(text + "\n📂 آخر الملفات الخاصة بك:\n" + files_text,
                                   reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-# ======== رفع الملفات مع دعم الملفات الكبيرة وتحذيرات ========
+# ======== رفع الملفات ========
 def handle_file(update, context):
     if not is_allowed_user(update):
         update.message.reply_text("❌ ليس لديك صلاحية رفع الملفات.")
@@ -242,23 +242,23 @@ def get_file(file_id):
 
         file = bot.get_file(file_id)
         file_url = file.file_path
-        remaining_hours = int((temporary_links[file_id] - datetime.now()).total_seconds() / 3600)
+        remaining = get_time_left(temporary_links[file_id])
 
         if file.file_path.endswith(('.mp4', '.mkv', '.mov', '.webm')):
             html_content = f"""
             <html>
-            <body style="display:flex;justify-content:center;align-items:center;height:100vh;">
+            <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;">
             <video width="80%" height="80%" controls autoplay>
               <source src="{file_url}" type="video/mp4">
               المتصفح لا يدعم الفيديو.
             </video>
-            <p>⏳ متبقي {remaining_hours} ساعة على الرابط</p>
+            <p>⏳ {remaining}</p>
             </body>
             </html>
             """
             return html_content, 200
         else:
-            return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a> | ⏳ متبقي {remaining_hours} ساعة", 200
+            return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a> | ⏳ {remaining}", 200
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
