@@ -6,9 +6,8 @@ from telegram.utils.request import Request
 from datetime import datetime, timedelta
 import qrcode
 from io import BytesIO
-
-# ✅ استدعاء ملف الميزة
-from utils.timeleft import get_time_left
+from threading import Thread
+import time
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -78,6 +77,32 @@ def generate_qr(url):
     bio.seek(0)
     return bio
 
+# ======== دوال الوقت المتبقي ========
+def format_time_left(expire_time):
+    remaining = expire_time - datetime.now()
+    if remaining.total_seconds() <= 0:
+        return "انتهى"
+    hours, remainder = divmod(int(remaining.total_seconds()), 3600)
+    minutes, _ = divmod(remainder, 60)
+    return f"⏳ {hours} س {minutes} د"
+
+def update_time_left_message(chat_id, message_id, file_id):
+    while file_id in temporary_links:
+        remaining = format_time_left(temporary_links[file_id])
+        try:
+            bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📥 تحميل الملف", url=f"{PUBLIC_URL}/get_file/{file_id}"),
+                    InlineKeyboardButton("🎬 مشاهدة الفيديو", url=f"{PUBLIC_URL}/get_file/{file_id}"),
+                    InlineKeyboardButton(remaining, callback_data="time_left_disabled")
+                ]])
+            )
+        except:
+            pass
+        time.sleep(60)  # تحديث كل دقيقة
+
 # ======== /start مع لوحة المستخدم ========
 def start(update, context):
     user_id = update.message.from_user.id
@@ -103,19 +128,17 @@ def start(update, context):
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
         user_recent_files = user_files.get(user_id, [])
+        files_text = ""
         if user_recent_files:
             for fid in user_recent_files[-5:]:
-                remaining = get_time_left(temporary_links.get(fid))
-                file_url = f"{PUBLIC_URL}/get_file/{fid}"
-                keyboard = [[
-                    InlineKeyboardButton("📥 تحميل الملف", url=file_url),
-                    InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url),
-                    InlineKeyboardButton(f"⏳ {remaining}", callback_data="time_left_disabled")
-                ]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                update.message.reply_text(f"ملف #{fid}", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                remaining = format_time_left(temporary_links.get(fid))
+                files_text += f"- <a href='{PUBLIC_URL}/get_file/{fid}'>ملف</a> | متبقي: {remaining}\n"
         else:
-            update.message.reply_text("لا توجد ملفات بعد.")
+            files_text = "لا توجد ملفات بعد."
+        keyboard = [[InlineKeyboardButton("رفع ملف جديد", callback_data="upload_file")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text(text + "\n📂 آخر الملفات الخاصة بك:\n" + files_text,
+                                  reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 # ======== رفع الملفات ========
 def handle_file(update, context):
@@ -157,16 +180,19 @@ def handle_file(update, context):
 
         file_url = f"{PUBLIC_URL}/get_file/{file_id}"
         qr_image = generate_qr(file_url)
-        remaining = get_time_left(expire_time)
 
+        remaining = format_time_left(expire_time)
         keyboard = [[
             InlineKeyboardButton("📥 تحميل الملف", url=file_url),
             InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url),
-            InlineKeyboardButton(f"⏳ {remaining}", callback_data="time_left_disabled")
+            InlineKeyboardButton(remaining, callback_data="time_left_disabled")
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_photo(qr_image, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
+
+        sent_msg = update.message.reply_photo(qr_image, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
         log_activity(f"User {msg.from_user.id} رفع ملف {file_id}")
+
+        Thread(target=update_time_left_message, args=(update.message.chat_id, sent_msg.message_id, file_id), daemon=True).start()
 
     except Exception as e:
         update.message.reply_text(f"❌ حدث خطأ: {e}")
@@ -246,7 +272,7 @@ def get_file(file_id):
 
         file = bot.get_file(file_id)
         file_url = file.file_path
-        remaining = get_time_left(temporary_links[file_id])
+        remaining = format_time_left(temporary_links[file_id])
 
         if file.file_path.endswith(('.mp4', '.mkv', '.mov', '.webm')):
             html_content = f"""
@@ -256,13 +282,13 @@ def get_file(file_id):
               <source src="{file_url}" type="video/mp4">
               المتصفح لا يدعم الفيديو.
             </video>
-            <p>⏳ {remaining}</p>
+            <p>{remaining}</p>
             </body>
             </html>
             """
             return html_content, 200
         else:
-            return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a> | ⏳ {remaining}", 200
+            return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a> | {remaining}", 200
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
