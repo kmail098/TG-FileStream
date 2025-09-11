@@ -50,13 +50,14 @@ def start(update, context):
     text = "✅ البوت شغال على Vercel\n📌 جميع الملفات صالحة لمدة 24 ساعة فقط."
     if PUBLIC_MODE:
         text += "\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت."
-    # إذا كان المسؤول، أظهر لوحة الإدارة
+    # لوحة الإدارة للمسؤول
     if user_id == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on")],
             [InlineKeyboardButton("🔒 إيقاف Public Mode", callback_data="public_off")],
             [InlineKeyboardButton("➕ إضافة مستخدم", callback_data="add_user")],
-            [InlineKeyboardButton("➖ إزالة مستخدم", callback_data="remove_user")]
+            [InlineKeyboardButton("➖ إزالة مستخدم", callback_data="remove_user")],
+            [InlineKeyboardButton("📋 قائمة المستخدمين", callback_data="list_users")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup)
@@ -92,7 +93,7 @@ def handle_file(update, context):
 
     file_url = f"{PUBLIC_URL}/get_file/{file_id}"
 
-    # إعداد أزرار Inline
+    # أزرار Inline للمستخدم
     keyboard = [[
         InlineKeyboardButton("📥 تحميل الملف", url=file_url),
         InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url)
@@ -113,11 +114,15 @@ def button_handler(update, context):
         PUBLIC_MODE = False
         query.edit_message_text("✅ تم إيقاف الوضع العام، فقط المستخدمين المصرح لهم يمكنهم استخدام البوت.")
     elif query.data == "add_user":
-        query.edit_message_text("📌 أرسل معرف المستخدم الذي تريد إضافته بعد الضغط على زر")
-        # يمكن إضافة واجهة استقبال ID هنا
+        query.edit_message_text("📌 أرسل معرف المستخدم الذي تريد إضافته بعد الضغط على الزر")
     elif query.data == "remove_user":
-        query.edit_message_text("📌 أرسل معرف المستخدم الذي تريد حذفه بعد الضغط على زر")
-        # يمكن إضافة واجهة استقبال ID هنا
+        query.edit_message_text("📌 أرسل معرف المستخدم الذي تريد حذفه بعد الضغط على الزر")
+    elif query.data == "list_users":
+        if allowed_users:
+            users_text = "\n".join(str(uid) for uid in allowed_users)
+            query.edit_message_text(f"📋 قائمة المستخدمين المصرح لهم:\n{users_text}")
+        else:
+            query.edit_message_text("⚠️ لا يوجد أي مستخدم مصرح له حالياً.")
 
 # ======== مسار التحميل / المشاهدة ========
 @app.route("/get_file/<file_id>", methods=["GET"])
