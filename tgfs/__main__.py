@@ -5,7 +5,7 @@ from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters
 from telegram.utils.request import Request
 from datetime import datetime, timedelta
 
-# ======== إنشاء تطبيق Flask ========
+# ======== إعداد Flask ========
 app = Flask(__name__)
 
 # ======== إعداد البوت ========
@@ -16,9 +16,11 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "https://tg-file-stream-gamma.vercel.app")
 bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8))
 dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
-# ======== قائمة المستخدمين المسموح لهم ========
+# ======== إعداد المستخدمين والصلاحيات ========
 ALLOWED_USERS_FILE = "allowed_users.txt"
-ADMIN_ID = 7485195087  # المسؤول الوحيد
+ADMIN_ID = 7485195087  # معرفك أنت المسؤول
+
+PUBLIC_MODE = False  # False = استخدام محدود، True = أي شخص
 
 def load_allowed_users():
     if not os.path.exists(ALLOWED_USERS_FILE):
@@ -34,16 +36,21 @@ def save_allowed_users(users):
 allowed_users = load_allowed_users()
 
 def is_allowed_user(update):
+    if PUBLIC_MODE:
+        return True
     return update.message.from_user.id in allowed_users
 
-# ======== تخزين روابط الملفات المؤقتة ========
+# ======== تخزين الروابط المؤقتة ========
 temporary_links = {}  # {file_id: expire_time}
 
 # ======== أوامر البوت ========
 def start(update, context):
     if not is_allowed_user(update):
         return
-    update.message.reply_text("✅ البوت شغال على Vercel\n📌 جميع الملفات صالحة لمدة 24 ساعة فقط.")
+    update.message.reply_text(
+        "✅ البوت شغال على Vercel\n📌 جميع الملفات صالحة لمدة 24 ساعة فقط."
+        + ("\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت." if PUBLIC_MODE else "")
+    )
 
 # ======== إدارة المستخدمين ========
 def add_user(update, context):
@@ -52,7 +59,7 @@ def add_user(update, context):
         return
 
     if len(context.args) != 1:
-        update.message.reply_text("🔻🔻 الاستخدام: /adduser <USER_ID>")
+        update.message.reply_text("❌ الاستخدام: /adduser <USER_ID>")
         return
 
     try:
@@ -103,7 +110,27 @@ dispatcher.add_handler(CommandHandler("adduser", add_user))
 dispatcher.add_handler(CommandHandler("removeuser", remove_user))
 dispatcher.add_handler(CommandHandler("listusers", list_users))
 
-# ======== استقبال الملفات والفيديوهات والصور ========
+# ======== وضع Public Mode ========
+def set_public_mode(update, context):
+    global PUBLIC_MODE
+    if update.message.from_user.id != ADMIN_ID:
+        update.message.reply_text("❌ فقط المسؤول يمكنه تغيير الوضع.")
+        return
+
+    if len(context.args) != 1 or context.args[0].lower() not in ["on", "off"]:
+        update.message.reply_text("❌ الاستخدام: /publicmode <on|off>")
+        return
+
+    if context.args[0].lower() == "on":
+        PUBLIC_MODE = True
+        update.message.reply_text("✅ تم تفعيل الوضع العام، كل المستخدمين يمكنهم استخدام البوت.")
+    else:
+        PUBLIC_MODE = False
+        update.message.reply_text("✅ تم إيقاف الوضع العام، فقط المستخدمين المصرح لهم يمكنهم استخدام البوت.")
+
+dispatcher.add_handler(CommandHandler("publicmode", set_public_mode))
+
+# ======== استقبال الملفات ========
 def handle_file(update, context):
     if not is_allowed_user(update):
         return
@@ -127,24 +154,24 @@ def handle_file(update, context):
         update.message.reply_text("❌ لم يتم التعرف على الملف.")
         return
 
-    # إعداد انتهاء صلاحية الرابط (24 ساعة)
     expire_time = datetime.now() + timedelta(hours=24)
     temporary_links[file_id] = expire_time
 
     link = f"{PUBLIC_URL}/get_file/{file_id}"
-    update.message.reply_text(f"📎 رابط الملف صالح لمدة 24 ساعة:\n{link}")
+    update.message.reply_text(
+        f"📎 رابط الملف صالح لمدة 24 ساعة فقط:\n{link}"
+        + ("\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت." if PUBLIC_MODE else "")
+    )
 
 dispatcher.add_handler(MessageHandler(Filters.document | Filters.video | Filters.audio | Filters.photo, handle_file))
 
-# ======== مسار التحميل والمشاهدة مع التحقق من الصلاحية ========
+# ======== مسار التحميل/المشاهدة ========
 @app.route("/get_file/<file_id>", methods=["GET"])
 def get_file(file_id):
     try:
-        # تحقق من وجود الرابط المؤقت
         if file_id not in temporary_links:
             return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
 
-        # تحقق من انتهاء الصلاحية
         if datetime.now() > temporary_links[file_id]:
             del temporary_links[file_id]
             return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
@@ -170,19 +197,19 @@ def get_file(file_id):
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
-# ======== مسار / Webhook ========
+# ======== Webhook ========
 @app.route("/", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
     dispatcher.process_update(update)
     return "OK", 200
 
-# ======== مسار اختبار Flask ========
+# ======== اختبار Flask ========
 @app.route("/test", methods=["GET"])
 def test():
     return "Flask يعمل على Vercel ✅", 200
 
-# ======== نقطة الدخول ========
+# ======== تشغيل التطبيق ========
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
