@@ -3,6 +3,7 @@ from flask import Flask, request
 from telegram import Bot, Update
 from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters
 from telegram.utils.request import Request
+from datetime import datetime, timedelta
 
 # ======== إنشاء تطبيق Flask ========
 app = Flask(__name__)
@@ -35,11 +36,14 @@ allowed_users = load_allowed_users()
 def is_allowed_user(update):
     return update.message.from_user.id in allowed_users
 
+# ======== تخزين روابط الملفات المؤقتة ========
+temporary_links = {}  # {file_id: expire_time}
+
 # ======== أوامر البوت ========
 def start(update, context):
     if not is_allowed_user(update):
         return
-    update.message.reply_text("✅ البوت شغال على Vercel")
+    update.message.reply_text("✅ البوت شغال على Vercel\n📌 جميع الملفات صالحة لمدة 24 ساعة فقط.")
 
 # ======== إدارة المستخدمين ========
 def add_user(update, context):
@@ -48,7 +52,7 @@ def add_user(update, context):
         return
 
     if len(context.args) != 1:
-        update.message.reply_text("🔻 الاستخدام: /adduser <USER_ID>")
+        update.message.reply_text("❌ الاستخدام: /adduser <USER_ID>")
         return
 
     try:
@@ -102,7 +106,7 @@ dispatcher.add_handler(CommandHandler("listusers", list_users))
 # ======== استقبال الملفات والفيديوهات والصور ========
 def handle_file(update, context):
     if not is_allowed_user(update):
-        return  # تجاهل أي مستخدم غير مسموح له
+        return
 
     msg = update.message
     file_id = None
@@ -123,15 +127,28 @@ def handle_file(update, context):
         update.message.reply_text("❌ لم يتم التعرف على الملف.")
         return
 
+    # إعداد انتهاء صلاحية الرابط (24 ساعة)
+    expire_time = datetime.now() + timedelta(hours=24)
+    temporary_links[file_id] = expire_time
+
     link = f"{PUBLIC_URL}/get_file/{file_id}"
-    update.message.reply_text(f"📎 رابط الملف:\n{link}")
+    update.message.reply_text(f"📎 رابط الملف صالح لمدة 24 ساعة:\n{link}")
 
 dispatcher.add_handler(MessageHandler(Filters.document | Filters.video | Filters.audio | Filters.photo, handle_file))
 
-# ======== مسار التحميل والمشاهدة ========
+# ======== مسار التحميل والمشاهدة مع التحقق من الصلاحية ========
 @app.route("/get_file/<file_id>", methods=["GET"])
 def get_file(file_id):
     try:
+        # تحقق من وجود الرابط المؤقت
+        if file_id not in temporary_links:
+            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+
+        # تحقق من انتهاء الصلاحية
+        if datetime.now() > temporary_links[file_id]:
+            del temporary_links[file_id]
+            return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
+
         file = bot.get_file(file_id)
         file_url = file.file_path
 
