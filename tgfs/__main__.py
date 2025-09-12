@@ -315,8 +315,13 @@ def get_file(file_id):
         file = bot.get_file(file_id)
         file_url = file.file_path
         
-        file_extension = os.path.splitext(file_url)[1].lower()
+        response = requests.get(file_url, stream=True)
+        
+        if response.status_code != 200:
+            return "❌ فشل تحميل الملف من تيليجرام.", 400
 
+        file_extension = os.path.splitext(file_url)[1].lower()
+        
         if file_extension in ['.mp4', '.mkv', '.mov', '.webm']:
             html_content = f"""
             <html>
@@ -369,9 +374,6 @@ def get_file(file_id):
             """
             return html_content, 200
         else:
-            response = requests.get(file_url, stream=True)
-            if response.status_code != 200:
-                return "❌ فشل تحميل الملف من تيليجرام.", 400
             return send_file(BytesIO(response.content), as_attachment=True, download_name=file_id + file_extension)
 
     except Exception as e:
