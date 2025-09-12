@@ -329,15 +329,25 @@ def get_file(file_id):
         file_url = file.file_path
         remaining = format_time_left(temporary_links[file_id])
 
-        if file.file_path.endswith(('.mp4', '.mkv', '.mov', '.webm')):
+        # قام هذا الجزء بإصلاح المشكلة.
+        file_extension = os.path.splitext(file_url)[1].lower()
+        mime_types = {
+            ".mp4": "video/mp4",
+            ".mkv": "video/x-matroska",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+        }
+        mime_type = mime_types.get(file_extension, "video/mp4")
+
+        if file_extension in mime_types:
             html_content = f"""
             <html>
-            <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;">
-            <video width="80%" height="80%" controls autoplay>
-              <source src="{file_url}" type="video/mp4">
-              المتصفح لا يدعم الفيديو.
+            <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column; background: #000; color: #fff;">
+            <video width="90%" height="90%" controls>
+              <source src="{file_url}" type="{mime_type}">
+              المتصفح لا يدعم هذا الفيديو.
             </video>
-            <p>{remaining}</p>
+            <p style="text-align: center;">{remaining}</p>
             </body>
             </html>
             """
@@ -346,6 +356,7 @@ def get_file(file_id):
             return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a> | {remaining}", 200
     except Exception as e:
         return f"حدث خطأ: {e}", 400
+
 
 # ======== Webhook ========
 @app.route("/", methods=["POST"])
