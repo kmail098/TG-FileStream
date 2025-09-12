@@ -18,7 +18,7 @@ app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BIN_CHANNEL = os.getenv("BIN_CHANNEL")
 PUBLIC_URL = os.getenv("PUBLIC_URL")
-ADMIN_ID = "7485195087"  # استبدل هذا الرقم بمعرف المستخدم الخاص بك
+ADMIN_ID = "7485195087"  # تم تحديثه بمعرف المستخدم الخاص بك
 MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8))
@@ -58,7 +58,7 @@ def get_allowed_users():
     return []
 
 def is_allowed_user(user_id):
-    if not mongo_client_active: return False # Disable if DB is down
+    if not mongo_client_active: return False
     if get_setting("public_mode"):
         return True
     return users_collection.count_documents({"user_id": user_id, "is_allowed": True}) > 0
