@@ -1,4 +1,4 @@
-import os
+Import os
 from flask import Flask, request
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from telegram.ext import Dispatcher, MessageHandler, Filters, CallbackQueryHandler, CommandHandler
@@ -304,11 +304,32 @@ def webhook():
 def test():
     return "Flask يعمل على Vercel ✅", 200
 
+# ======== ميزة الإحصائيات الجديدة ========
+def show_stats(update, context):
+    user_id = update.message.from_user.id
+    if user_id != ADMIN_ID:
+        update.message.reply_text("❌ ليس لديك صلاحية الوصول إلى الإحصائيات.")
+        return
+
+    total_users_count = len(allowed_users)
+    total_files_uploaded = len(temporary_links)
+    
+    stats_text = (
+        "📊 **إحصائيات البوت:**\n\n"
+        f"**الوضع العام:** {'مفعل ✅' if PUBLIC_MODE else 'متوقف 🔒'}\n"
+        f"**عدد المستخدمين المسجلين:** {total_users_count} مستخدم\n"
+        f"**إجمالي الملفات المرفوعة حاليًا:** {total_files_uploaded} ملف\n"
+        "*(ملاحظة: هذه الإحصائيات مؤقتة وستُعاد إلى الصفر عند إعادة تشغيل البوت)*"
+    )
+    
+    update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+
 # ======== إضافة المعالجات ========
 dispatcher.add_handler(MessageHandler(Filters.document | Filters.video | Filters.audio | Filters.photo, handle_file))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("stats", show_stats)) # <--- تم إضافة هذا المعالج
 
 # ======== تشغيل التطبيق ========
 if __name__ == "__main__":
