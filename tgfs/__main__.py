@@ -82,9 +82,10 @@ def send_alert(message, file_url=None):
             notification_text = f"🔔 إشعار جديد:\n\n{message}"
             if file_url:
                 notification_text += f"\n\n🔗 رابط: {file_url}"
-            bot.send_message(chat_id=BIN_CHANNEL, text=notification_text, parse_mode=ParseMode.MARKDOWN) # <--- تم تعديل chat_id
+            bot.send_message(chat_id=BIN_CHANNEL, text=notification_text, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
-            print(f"Failed to send notification: {e}")
+            # طباعة الخطأ في السجل لمساعدتك على معرفة السبب
+            print(f"❌ فشل إرسال الإشعار إلى القناة. السبب: {e}")
 
 # ======== إنشاء QR Code ========
 def generate_qr(url):
@@ -135,7 +136,7 @@ def start(update, context):
     if PUBLIC_MODE:
         text += "\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت."
     if NOTIFICATIONS_ENABLED:
-        text += "\n🔔 الإشعارات مفعلة للمسؤول وتُرسل إلى قناة الأرشيف." # <--- تحديث النص
+        text += "\n🔔 الإشعارات مفعلة للمسؤول وتُرسل إلى قناة الأرشيف."
     else:
         text += "\n🔕 الإشعارات متوقفة للمسؤول."
 
@@ -380,3 +381,4 @@ dispatcher.add_handler(CommandHandler("stats", show_stats))
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
+
