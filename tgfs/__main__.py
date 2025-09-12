@@ -8,6 +8,8 @@ import qrcode
 from io import BytesIO
 from threading import Thread
 import time
+from pymongo import MongoClient
+import urllib.parse
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -16,78 +18,86 @@ app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BIN_CHANNEL = os.getenv("BIN_CHANNEL")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://tg-file-stream-gamma.vercel.app")
+MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8))
 dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
-# ======== المستخدمين والصلاحيات ========
-ALLOWED_USERS_FILE = "allowed_users.txt"
-ADMIN_ID = 7485195087
-PUBLIC_MODE = False
-NOTIFICATIONS_ENABLED = True
-activity_log = []
-user_files = {}  # {user_id: [file_ids]}
+# ======== الاتصال بقاعدة البيانات ========
+try:
+    client = MongoClient(MONGO_URI)
+    db = client.get_database("file_stream_db")
+    users_collection = db.get_collection("users")
+    settings_collection = db.get_collection("settings")
+    activity_collection = db.get_collection("activity_log")
+    
+    # تهيئة الإعدادات الافتراضية إذا لم تكن موجودة
+    if settings_collection.count_documents({}) == 0:
+        settings_collection.insert_one({"_id": "global_settings", "public_mode": False, "notifications_enabled": True})
+        
+    print("✅ تم الاتصال بقاعدة بيانات MongoDB بنجاح.")
 
-def load_allowed_users():
-    if not os.path.exists(ALLOWED_USERS_FILE):
-        return []
-    with open(ALLOWED_USERS_FILE, "r") as f:
-        return [int(line.strip()) for line in f.readlines()]
+except Exception as e:
+    print(f"❌ فشل الاتصال بقاعدة البيانات: {e}")
+    client = None
 
-def save_allowed_users(users):
-    with open(ALLOWED_USERS_FILE, "w") as f:
-        for uid in users:
-            f.write(f"{uid}\n")
+# ======== دوال MongoDB المساعدة ========
+def get_setting(key):
+    if client:
+        settings = settings_collection.find_one({"_id": "global_settings"})
+        return settings.get(key)
+    return False
 
-allowed_users = load_allowed_users()
+def update_setting(key, value):
+    if client:
+        settings_collection.update_one({"_id": "global_settings"}, {"$set": {key: value}})
 
-def is_allowed_user(update):
-    if PUBLIC_MODE:
+def get_allowed_users():
+    if client:
+        return [doc['user_id'] for doc in users_collection.find({"is_allowed": True})]
+    return []
+
+def is_allowed_user(user_id):
+    if get_setting("public_mode"):
         return True
-    return update.message.from_user.id in allowed_users
+    if client:
+        return users_collection.count_documents({"user_id": user_id, "is_allowed": True}) > 0
+    return False
 
-# ======== روابط الملفات المؤقتة مع عداد وقت متبقي ========
-temporary_links = {}  # {file_id: expire_time}
-
-# ======== دوال المساعدة ========
 def add_user(user_id):
-    added = False
-    if user_id not in allowed_users:
-        allowed_users.append(user_id)
-        save_allowed_users(allowed_users)
-        added = True
-    if added:
-        alert_message = f"المستخدم: `{user_id}`\nالعملية: إضافة مستخدم جديد"
-        send_alert(alert_message)
-    return added
+    if client:
+        user_doc = users_collection.find_one({"user_id": user_id})
+        if user_doc and user_doc.get("is_allowed"):
+            return False
+        
+        users_collection.update_one({"user_id": user_id}, {"$set": {"is_allowed": True}}, upsert=True)
+        return True
+    return False
 
 def remove_user(user_id):
-    removed = False
-    if user_id in allowed_users:
-        allowed_users.remove(user_id)
-        save_allowed_users(allowed_users)
-        removed = True
-    if removed:
-        alert_message = f"المستخدم: `{user_id}`\nالعملية: حذف مستخدم"
-        send_alert(alert_message)
-    return removed
+    if client:
+        users_collection.update_one({"user_id": user_id}, {"$set": {"is_allowed": False}})
+        return True
+    return False
 
 def log_activity(msg):
-    activity_log.append(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
+    if client:
+        activity_collection.insert_one({
+            "timestamp": datetime.now(),
+            "message": msg
+        })
 
-# ======== دالة الإشعارات الذكية ========
+# ======== دوال المساعدة ========
 def send_alert(message, file_url=None):
-    if NOTIFICATIONS_ENABLED:
+    if get_setting("notifications_enabled"):
         try:
             notification_text = f"🔔 إشعار جديد:\n\n{message}"
             if file_url:
                 notification_text += f"\n\n🔗 رابط: {file_url}"
             bot.send_message(chat_id=BIN_CHANNEL, text=notification_text, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
-            # طباعة الخطأ في السجل لمساعدتك على معرفة السبب
             print(f"❌ فشل إرسال الإشعار إلى القناة. السبب: {e}")
 
-# ======== إنشاء QR Code ========
 def generate_qr(url):
     qr = qrcode.QRCode(version=1, box_size=5, border=2)
     qr.add_data(url)
@@ -98,7 +108,8 @@ def generate_qr(url):
     bio.seek(0)
     return bio
 
-# ======== دوال الوقت المتبقي ========
+temporary_links = {}
+
 def format_time_left(expire_time):
     remaining = expire_time - datetime.now()
     if remaining.total_seconds() <= 0:
@@ -122,54 +133,47 @@ def update_time_left_message(chat_id, message_id, file_id):
             )
         except:
             pass
-        time.sleep(60)  # تحديث كل دقيقة
+        time.sleep(60)
 
 # ======== /start مع لوحة المستخدم ========
 def start(update, context):
     user_id = update.message.from_user.id
-    if not is_allowed_user(update):
+    if not is_allowed_user(user_id):
         update.message.reply_text("❌ ليس لديك صلاحية استخدام البوت.")
         return
 
+    public_mode = get_setting("public_mode")
+    notifications_enabled = get_setting("notifications_enabled")
+
     text = "<b>🤖 أهلاً بك في البوت الاحترافي!</b>\n"
     text += "<i>جميع الملفات صالحة لمدة 24 ساعة فقط.</i>\n"
-    if PUBLIC_MODE:
+    if public_mode:
         text += "\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت."
-    if NOTIFICATIONS_ENABLED:
+    if notifications_enabled:
         text += "\n🔔 الإشعارات مفعلة للمسؤول وتُرسل إلى قناة الأرشيف."
     else:
         text += "\n🔕 الإشعارات متوقفة للمسؤول."
 
     if user_id == ADMIN_ID:
         keyboard = [
-            [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on"),
-             InlineKeyboardButton("🔒 إيقاف Public Mode", callback_data="public_off")],
+            [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on") if not public_mode else InlineKeyboardButton("🔒 إيقاف Public Mode", callback_data="public_off")],
             [InlineKeyboardButton("➕ إضافة مستخدم", callback_data="add_user"),
              InlineKeyboardButton("➖ إزالة مستخدم", callback_data="remove_user")],
             [InlineKeyboardButton("📋 قائمة المستخدمين", callback_data="list_users"),
              InlineKeyboardButton("📝 سجل النشاطات", callback_data="activity_log")],
-            [InlineKeyboardButton("🔔 تفعيل الإشعارات", callback_data="notifications_on"),
-             InlineKeyboardButton("🔕 إيقاف الإشعارات", callback_data="notifications_off")]
+            [InlineKeyboardButton("🔔 تفعيل الإشعارات", callback_data="notifications_on") if not notifications_enabled else InlineKeyboardButton("🔕 إيقاف الإشعارات", callback_data="notifications_off")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
-        user_recent_files = user_files.get(user_id, [])
-        files_text = ""
-        if user_recent_files:
-            for fid in user_recent_files[-5:]:
-                remaining = format_time_left(temporary_links.get(fid))
-                files_text += f"- <a href='{PUBLIC_URL}/get_file/{fid}'>ملف</a> | متبقي: {remaining}\n"
-        else:
-            files_text = "لا توجد ملفات بعد."
         keyboard = [[InlineKeyboardButton("رفع ملف جديد", callback_data="upload_file")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text(text + "\n📂 آخر الملفات الخاصة بك:\n" + files_text,
-                                  reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 # ======== رفع الملفات ========
 def handle_file(update, context):
-    if not is_allowed_user(update):
+    user_id = update.message.from_user.id
+    if not is_allowed_user(user_id):
         update.message.reply_text("❌ ليس لديك صلاحية رفع الملفات.")
         return
 
@@ -208,8 +212,7 @@ def handle_file(update, context):
 
         expire_time = datetime.now() + timedelta(hours=24)
         temporary_links[file_id] = expire_time
-        user_files.setdefault(msg.from_user.id, []).append(file_id)
-
+        
         file_url = f"{PUBLIC_URL}/get_file/{file_id}"
         qr_image = generate_qr(file_url)
 
@@ -222,6 +225,7 @@ def handle_file(update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         sent_msg = update.message.reply_photo(qr_image, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
+        
         log_activity(f"User {msg.from_user.id} رفع ملف {file_id}")
 
         alert_message = (
@@ -244,16 +248,16 @@ def button_handler(update, context):
     global PUBLIC_MODE, NOTIFICATIONS_ENABLED
 
     if query.data == "public_on":
-        PUBLIC_MODE = True
+        update_setting("public_mode", True)
         query.edit_message_text("✅ تم تفعيل الوضع العام.")
     elif query.data == "public_off":
-        PUBLIC_MODE = False
+        update_setting("public_mode", False)
         query.edit_message_text("✅ تم إيقاف الوضع العام.")
     elif query.data == "notifications_on":
-        NOTIFICATIONS_ENABLED = True
+        update_setting("notifications_enabled", True)
         query.edit_message_text("🔔 تم تفعيل الإشعارات.")
     elif query.data == "notifications_off":
-        NOTIFICATIONS_ENABLED = False
+        update_setting("notifications_enabled", False)
         query.edit_message_text("🔕 تم إيقاف الإشعارات.")
     elif query.data == "add_user":
         query.edit_message_text("📌 أرسل معرف المستخدم الجديد بعد هذه الرسالة.")
@@ -262,17 +266,19 @@ def button_handler(update, context):
         query.edit_message_text("📌 أرسل معرف المستخدم المراد حذفه بعد هذه الرسالة.")
         context.user_data['action'] = 'remove_user'
     elif query.data == "list_users":
+        allowed_users = get_allowed_users()
         if allowed_users:
             users_text = "\n".join(str(uid) for uid in allowed_users)
             query.edit_message_text(f"📋 قائمة المستخدمين:\n{users_text}")
         else:
             query.edit_message_text("⚠️ لا يوجد أي مستخدم مصرح له حالياً.")
     elif query.data == "activity_log":
-        if activity_log:
-            logs = "\n".join(activity_log[-20:])
-            query.edit_message_text(f"📝 سجل النشاطات (آخر 20):\n{logs}")
+        if client:
+            logs = activity_collection.find().sort("timestamp", -1).limit(20)
+            logs_text = "\n".join([log['message'] for log in logs])
+            query.edit_message_text(f"📝 سجل النشاطات (آخر 20):\n{logs_text}")
         else:
-            query.edit_message_text("⚠️ لا توجد أي نشاطات حتى الآن.")
+            query.edit_message_text("⚠️ لا يمكن الوصول إلى السجل.")
 
 # ======== التعامل مع إدخال المعرف ========
 def handle_text(update, context):
@@ -350,22 +356,31 @@ def webhook():
 def test():
     return "Flask يعمل على Vercel ✅", 200
 
+# ======== اختبار الإشعارات ========
+@app.route("/test_alert", methods=["GET"])
+def test_alert():
+    try:
+        bot.send_message(chat_id=BIN_CHANNEL, text="✅ هذا إشعار تجريبي ناجح!")
+        return "تم إرسال الإشعار التجريبي بنجاح إلى القناة.", 200
+    except Exception as e:
+        return f"❌ فشل إرسال الإشعار: {e}", 500
+
 # ======== ميزة الإحصائيات الجديدة ========
 def show_stats(update, context):
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
         update.message.reply_text("❌ ليس لديك صلاحية الوصول إلى الإحصائيات.")
         return
-
-    total_users_count = len(allowed_users)
-    total_files_uploaded = len(temporary_links)
+    
+    total_users_count = users_collection.count_documents({"is_allowed": True}) if client else 0
+    total_activity_logs = activity_collection.count_documents({}) if client else 0
     
     stats_text = (
         "📊 **إحصائيات البوت:**\n\n"
-        f"**الوضع العام:** {'مفعل ✅' if PUBLIC_MODE else 'متوقف 🔒'}\n"
+        f"**الوضع العام:** {'مفعل ✅' if get_setting('public_mode') else 'متوقف 🔒'}\n"
         f"**عدد المستخدمين المسجلين:** {total_users_count} مستخدم\n"
-        f"**إجمالي الملفات المرفوعة حاليًا:** {total_files_uploaded} ملف\n"
-        "*(ملاحظة: هذه الإحصائيات مؤقتة وستُعاد إلى الصفر عند إعادة تشغيل البوت)*"
+        f"**إجمالي عدد الأنشطة:** {total_activity_logs} نشاط\n"
+        "*(ملاحظة: هذه الإحصائيات دائمة ومحفوظة في قاعدة البيانات)*"
     )
     
     update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
