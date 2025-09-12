@@ -24,6 +24,7 @@ dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 ALLOWED_USERS_FILE = "allowed_users.txt"
 ADMIN_ID = 7485195087
 PUBLIC_MODE = False
+NOTIFICATIONS_ENABLED = True  # <--- إضافة متغير حالة الإشعارات
 activity_log = []
 user_files = {}  # {user_id: [file_ids]}
 
@@ -52,19 +53,41 @@ temporary_links = {}  # {file_id: expire_time}
 def add_user(user_id):
     if user_id in allowed_users:
         return False
+    added = True
     allowed_users.append(user_id)
     save_allowed_users(allowed_users)
-    return True
+    if added:
+        alert_message = f"المستخدم: `{user_id}`\nالعملية: إضافة مستخدم جديد"
+        send_alert(alert_message)
+    return added
 
 def remove_user(user_id):
     if user_id not in allowed_users:
         return False
-    allowed_users.remove(user_id)
-    save_allowed_users(allowed_users)
-    return True
+    removed = False
+    if user_id in allowed_users:
+        allowed_users.remove(user_id)
+        save_allowed_users(allowed_users)
+        removed = True
+    if removed:
+        alert_message = f"المستخدم: `{user_id}`\nالعملية: حذف مستخدم"
+        send_alert(alert_message)
+    return removed
 
 def log_activity(msg):
     activity_log.append(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}")
+
+# ======== دالة الإشعارات الذكية ========
+def send_alert(message, file_url=None):
+    if NOTIFICATIONS_ENABLED:
+        try:
+            notification_text = f"🔔 إشعار جديد:\n\n{message}"
+            if file_url:
+                notification_text += f"\n\n🔗 رابط: {file_url}"
+            bot.send_message(chat_id=ADMIN_ID, text=notification_text, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+
 
 # ======== إنشاء QR Code ========
 def generate_qr(url):
@@ -114,6 +137,10 @@ def start(update, context):
     text += "<i>جميع الملفات صالحة لمدة 24 ساعة فقط.</i>\n"
     if PUBLIC_MODE:
         text += "\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت."
+    if NOTIFICATIONS_ENABLED:
+        text += "\n🔔 الإشعارات مفعلة للمسؤول."
+    else:
+        text += "\n🔕 الإشعارات متوقفة للمسؤول."
 
     if user_id == ADMIN_ID:
         keyboard = [
@@ -122,7 +149,9 @@ def start(update, context):
             [InlineKeyboardButton("➕ إضافة مستخدم", callback_data="add_user"),
              InlineKeyboardButton("➖ إزالة مستخدم", callback_data="remove_user")],
             [InlineKeyboardButton("📋 قائمة المستخدمين", callback_data="list_users"),
-             InlineKeyboardButton("📝 سجل النشاطات", callback_data="activity_log")]
+             InlineKeyboardButton("📝 سجل النشاطات", callback_data="activity_log")],
+            [InlineKeyboardButton("🔔 تفعيل الإشعارات", callback_data="notifications_on"),
+             InlineKeyboardButton("🔕 إيقاف الإشعارات", callback_data="notifications_off")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
@@ -151,27 +180,32 @@ def handle_file(update, context):
     file_size = 0
 
     try:
+        file_type = ""
         if msg.photo:
             sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=msg.photo[-1].file_id)
             file_id = sent.photo[-1].file_id
             file_size = msg.photo[-1].file_size
+            file_type = "صورة"
         elif msg.video:
             sent = bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
             file_id = sent.video.file_id
             file_size = msg.video.file_size
+            file_type = "فيديو"
         elif msg.audio:
             sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=msg.audio.file_id)
             file_id = sent.audio.file_id
             file_size = msg.audio.file_size
+            file_type = "ملف صوتي"
         elif msg.document:
             sent = bot.send_document(chat_id=BIN_CHANNEL, document=msg.document.file_id)
             file_id = sent.document.file_id
             file_size = msg.document.file_size
+            file_type = "مستند"
         else:
             update.message.reply_text("❌ لم يتم التعرف على الملف.")
             return
 
-        if file_size > 100*1024*1024:
+        if file_size > 100 * 1024 * 1024:
             update.message.reply_text("⚠️ الملف كبير جدًا (>100MB)، قد يستغرق رفعه وقت أطول.")
 
         expire_time = datetime.now() + timedelta(hours=24)
@@ -192,6 +226,14 @@ def handle_file(update, context):
         sent_msg = update.message.reply_photo(qr_image, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
         log_activity(f"User {msg.from_user.id} رفع ملف {file_id}")
 
+        alert_message = (
+            f"المستخدم: `{msg.from_user.first_name}` ({msg.from_user.id})\n"
+            f"العملية: رفع {file_type}\n"
+            f"الوقت: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n"
+            f"الحجم: `{file_size / (1024 * 1024):.2f}` ميجابايت"
+        )
+        send_alert(alert_message, file_url)
+
         Thread(target=update_time_left_message, args=(update.message.chat_id, sent_msg.message_id, file_id), daemon=True).start()
 
     except Exception as e:
@@ -201,7 +243,7 @@ def handle_file(update, context):
 def button_handler(update, context):
     query = update.callback_query
     query.answer()
-    global PUBLIC_MODE
+    global PUBLIC_MODE, NOTIFICATIONS_ENABLED
 
     if query.data == "public_on":
         PUBLIC_MODE = True
@@ -209,6 +251,12 @@ def button_handler(update, context):
     elif query.data == "public_off":
         PUBLIC_MODE = False
         query.edit_message_text("✅ تم إيقاف الوضع العام.")
+    elif query.data == "notifications_on":
+        NOTIFICATIONS_ENABLED = True
+        query.edit_message_text("🔔 تم تفعيل الإشعارات.")
+    elif query.data == "notifications_off":
+        NOTIFICATIONS_ENABLED = False
+        query.edit_message_text("🔕 تم إيقاف الإشعارات.")
     elif query.data == "add_user":
         query.edit_message_text("📌 أرسل معرف المستخدم الجديد بعد هذه الرسالة.")
         context.user_data['action'] = 'add_user'
@@ -329,7 +377,7 @@ dispatcher.add_handler(MessageHandler(Filters.document | Filters.video | Filters
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(CommandHandler("stats", show_stats)) # <--- تم إضافة هذا المعالج
+dispatcher.add_handler(CommandHandler("stats", show_stats))
 
 # ======== تشغيل التطبيق ========
 if __name__ == "__main__":
