@@ -32,7 +32,7 @@ try:
     users_collection = db.get_collection("users")
     settings_collection = db.get_collection("settings")
     activity_collection = db.get_collection("activity_log")
-    links_collection = db.get_collection("links")  # إضافة مجموعة جديدة
+    links_collection = db.get_collection("links")
     
     if settings_collection.count_documents({}) == 0:
         settings_collection.insert_one({"_id": "global_settings", "public_mode": False, "notifications_enabled": True})
@@ -205,8 +205,7 @@ def handle_file(update, context):
         remaining = format_time_left(expire_time)
         keyboard = [[
             InlineKeyboardButton("📥 تحميل الملف", url=file_url),
-            InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url),
-            InlineKeyboardButton(remaining, callback_data="time_left_disabled")
+            InlineKeyboardButton("🎬 مشاهدة الفيديو", url=file_url)
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -304,7 +303,6 @@ def handle_text(update, context):
 @app.route("/get_file/<file_id>", methods=["GET"])
 def get_file(file_id):
     try:
-        # التحقق من الرابط في قاعدة البيانات
         link_doc = links_collection.find_one({"_id": file_id})
         if not link_doc:
             return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
@@ -316,7 +314,6 @@ def get_file(file_id):
 
         file = bot.get_file(file_id)
         file_url = file.file_path
-        remaining = format_time_left(expire_time)
 
         response = requests.get(file_url, stream=True)
         
@@ -326,7 +323,56 @@ def get_file(file_id):
         file_extension = os.path.splitext(file_url)[1].lower()
         
         if file_extension in ['.mp4', '.mkv', '.mov', '.webm']:
-            return send_file(BytesIO(response.content), mimetype="video/mp4")
+            html_content = f"""
+            <html>
+            <head>
+                <style>
+                    body {{
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        flex-direction: column;
+                        background: #000;
+                        color: #fff;
+                        font-family: Arial, sans-serif;
+                    }}
+                </style>
+            </head>
+            <body>
+                <video width="90%" height="90%" controls>
+                  <source src="{file_url}" type="video/mp4">
+                  المتصفح لا يدعم هذا الفيديو.
+                </video>
+                <p id="countdown" style="text-align: center; margin-top: 10px;"></p>
+                <script>
+                    var expire_time = new Date("{expire_time.isoformat()}Z");
+                    var countdown_el = document.getElementById("countdown");
+
+                    function updateCountdown() {{
+                        var now = new Date();
+                        var remaining = expire_time.getTime() - now.getTime();
+                        
+                        if (remaining <= 0) {{
+                            countdown_el.innerHTML = "انتهى";
+                            clearInterval(interval);
+                            return;
+                        }}
+
+                        var hours = Math.floor((remaining / (1000 * 60 * 60)));
+                        var minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+                        var seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+                        countdown_el.innerHTML = "⏳ " + hours + " س " + minutes + " د " + seconds + " ث";
+                    }}
+
+                    updateCountdown();
+                    var interval = setInterval(updateCountdown, 1000);
+                </script>
+            </body>
+            </html>
+            """
+            return html_content, 200
         else:
             return send_file(BytesIO(response.content), as_attachment=True, download_name=file_id + file_extension)
 
