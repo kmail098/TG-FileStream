@@ -7,10 +7,10 @@ from datetime import datetime, timedelta
 import qrcode
 from io import BytesIO
 import requests
-from threading import Thread
-import time
 from pymongo import MongoClient
 import urllib.parse
+from threading import Thread
+import time
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -323,7 +323,56 @@ def get_file(file_id):
         file_extension = os.path.splitext(file_url)[1].lower()
         
         if file_extension in ['.mp4', '.mkv', '.mov', '.webm']:
-            return send_file(BytesIO(response.content), mimetype="video/mp4")
+            html_content = f"""
+            <html>
+            <head>
+                <style>
+                    body {{
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        flex-direction: column;
+                        background: #000;
+                        color: #fff;
+                        font-family: Arial, sans-serif;
+                    }}
+                </style>
+            </head>
+            <body>
+                <video width="90%" height="90%" controls>
+                  <source src="{file_url}" type="video/mp4">
+                  المتصفح لا يدعم هذا الفيديو.
+                </video>
+                <p id="countdown" style="text-align: center; margin-top: 10px;"></p>
+                <script>
+                    var expire_time = new Date("{expire_time.isoformat()}Z");
+                    var countdown_el = document.getElementById("countdown");
+
+                    function updateCountdown() {{
+                        var now = new Date();
+                        var remaining = expire_time.getTime() - now.getTime();
+                        
+                        if (remaining <= 0) {{
+                            countdown_el.innerHTML = "انتهى";
+                            clearInterval(interval);
+                            return;
+                        }}
+
+                        var hours = Math.floor((remaining / (1000 * 60 * 60)));
+                        var minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+                        var seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+                        countdown_el.innerHTML = "⏳ " + hours + " س " + minutes + " د " + seconds + " ث";
+                    }}
+
+                    updateCountdown();
+                    var interval = setInterval(updateCountdown, 1000);
+                </script>
+            </body>
+            </html>
+            """
+            return html_content, 200
         else:
             return send_file(BytesIO(response.content), as_attachment=True, download_name=file_id + file_extension)
 
