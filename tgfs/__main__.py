@@ -24,7 +24,7 @@ dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 ALLOWED_USERS_FILE = "allowed_users.txt"
 ADMIN_ID = 7485195087
 PUBLIC_MODE = False
-NOTIFICATIONS_ENABLED = True  # <--- إضافة متغير حالة الإشعارات
+NOTIFICATIONS_ENABLED = True
 activity_log = []
 user_files = {}  # {user_id: [file_ids]}
 
@@ -51,19 +51,17 @@ temporary_links = {}  # {file_id: expire_time}
 
 # ======== دوال المساعدة ========
 def add_user(user_id):
-    if user_id in allowed_users:
-        return False
-    added = True
-    allowed_users.append(user_id)
-    save_allowed_users(allowed_users)
+    added = False
+    if user_id not in allowed_users:
+        allowed_users.append(user_id)
+        save_allowed_users(allowed_users)
+        added = True
     if added:
         alert_message = f"المستخدم: `{user_id}`\nالعملية: إضافة مستخدم جديد"
         send_alert(alert_message)
     return added
 
 def remove_user(user_id):
-    if user_id not in allowed_users:
-        return False
     removed = False
     if user_id in allowed_users:
         allowed_users.remove(user_id)
@@ -84,10 +82,9 @@ def send_alert(message, file_url=None):
             notification_text = f"🔔 إشعار جديد:\n\n{message}"
             if file_url:
                 notification_text += f"\n\n🔗 رابط: {file_url}"
-            bot.send_message(chat_id=ADMIN_ID, text=notification_text, parse_mode=ParseMode.MARKDOWN)
+            bot.send_message(chat_id=BIN_CHANNEL, text=notification_text, parse_mode=ParseMode.MARKDOWN) # <--- تم تعديل chat_id
         except Exception as e:
             print(f"Failed to send notification: {e}")
-
 
 # ======== إنشاء QR Code ========
 def generate_qr(url):
@@ -138,7 +135,7 @@ def start(update, context):
     if PUBLIC_MODE:
         text += "\n⚠️ الوضع العام مفعل، كل شخص يمكنه استخدام البوت."
     if NOTIFICATIONS_ENABLED:
-        text += "\n🔔 الإشعارات مفعلة للمسؤول."
+        text += "\n🔔 الإشعارات مفعلة للمسؤول وتُرسل إلى قناة الأرشيف." # <--- تحديث النص
     else:
         text += "\n🔕 الإشعارات متوقفة للمسؤول."
 
