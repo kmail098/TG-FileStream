@@ -17,7 +17,8 @@ app = Flask(__name__)
 # ======== إعداد البوت ========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BIN_CHANNEL = os.getenv("BIN_CHANNEL")
-PUBLIC_URL = os.getenv("PUBLIC_URL", "https://tg-file-stream-gamma.vercel.app")
+PUBLIC_URL = os.getenv("PUBLIC_URL")
+ADMIN_ID = os.getenv("ADMIN_ID")
 MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8))
@@ -31,57 +32,54 @@ try:
     settings_collection = db.get_collection("settings")
     activity_collection = db.get_collection("activity_log")
     
-    # تهيئة الإعدادات الافتراضية إذا لم تكن موجودة
     if settings_collection.count_documents({}) == 0:
         settings_collection.insert_one({"_id": "global_settings", "public_mode": False, "notifications_enabled": True})
         
     print("✅ تم الاتصال بقاعدة بيانات MongoDB بنجاح.")
-
+    mongo_client_active = True
 except Exception as e:
     print(f"❌ فشل الاتصال بقاعدة البيانات: {e}")
-    client = None
+    mongo_client_active = False
 
 # ======== دوال MongoDB المساعدة ========
 def get_setting(key):
-    if client:
+    if mongo_client_active:
         settings = settings_collection.find_one({"_id": "global_settings"})
         return settings.get(key)
     return False
 
 def update_setting(key, value):
-    if client:
+    if mongo_client_active:
         settings_collection.update_one({"_id": "global_settings"}, {"$set": {key: value}})
 
 def get_allowed_users():
-    if client:
+    if mongo_client_active:
         return [doc['user_id'] for doc in users_collection.find({"is_allowed": True})]
     return []
 
 def is_allowed_user(user_id):
+    if not mongo_client_active: return False # Disable if DB is down
     if get_setting("public_mode"):
         return True
-    if client:
-        return users_collection.count_documents({"user_id": user_id, "is_allowed": True}) > 0
-    return False
+    return users_collection.count_documents({"user_id": user_id, "is_allowed": True}) > 0
 
 def add_user(user_id):
-    if client:
+    if mongo_client_active:
         user_doc = users_collection.find_one({"user_id": user_id})
         if user_doc and user_doc.get("is_allowed"):
             return False
-        
         users_collection.update_one({"user_id": user_id}, {"$set": {"is_allowed": True}}, upsert=True)
         return True
     return False
 
 def remove_user(user_id):
-    if client:
+    if mongo_client_active:
         users_collection.update_one({"user_id": user_id}, {"$set": {"is_allowed": False}})
         return True
     return False
 
 def log_activity(msg):
-    if client:
+    if mongo_client_active:
         activity_collection.insert_one({
             "timestamp": datetime.now(),
             "message": msg
@@ -154,7 +152,7 @@ def start(update, context):
     else:
         text += "\n🔕 الإشعارات متوقفة للمسؤول."
 
-    if user_id == ADMIN_ID:
+    if str(user_id) == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("🔓 تفعيل Public Mode", callback_data="public_on") if not public_mode else InlineKeyboardButton("🔒 إيقاف Public Mode", callback_data="public_off")],
             [InlineKeyboardButton("➕ إضافة مستخدم", callback_data="add_user"),
@@ -245,7 +243,9 @@ def handle_file(update, context):
 def button_handler(update, context):
     query = update.callback_query
     query.answer()
-    global PUBLIC_MODE, NOTIFICATIONS_ENABLED
+    
+    if str(query.from_user.id) != ADMIN_ID:
+        return
 
     if query.data == "public_on":
         update_setting("public_mode", True)
@@ -266,23 +266,26 @@ def button_handler(update, context):
         query.edit_message_text("📌 أرسل معرف المستخدم المراد حذفه بعد هذه الرسالة.")
         context.user_data['action'] = 'remove_user'
     elif query.data == "list_users":
-        allowed_users = get_allowed_users()
-        if allowed_users:
-            users_text = "\n".join(str(uid) for uid in allowed_users)
-            query.edit_message_text(f"📋 قائمة المستخدمين:\n{users_text}")
+        if mongo_client_active:
+            allowed_users = get_allowed_users()
+            if allowed_users:
+                users_text = "\n".join(str(uid) for uid in allowed_users)
+                query.edit_message_text(f"📋 قائمة المستخدمين:\n{users_text}")
+            else:
+                query.edit_message_text("⚠️ لا يوجد أي مستخدم مصرح له حالياً.")
         else:
-            query.edit_message_text("⚠️ لا يوجد أي مستخدم مصرح له حالياً.")
+            query.edit_message_text("❌ لا يمكن الوصول إلى قاعدة البيانات.")
     elif query.data == "activity_log":
-        if client:
+        if mongo_client_active:
             logs = activity_collection.find().sort("timestamp", -1).limit(20)
             logs_text = "\n".join([log['message'] for log in logs])
             query.edit_message_text(f"📝 سجل النشاطات (آخر 20):\n{logs_text}")
         else:
-            query.edit_message_text("⚠️ لا يمكن الوصول إلى السجل.")
+            query.edit_message_text("❌ لا يمكن الوصول إلى السجل.")
 
 # ======== التعامل مع إدخال المعرف ========
 def handle_text(update, context):
-    user_id = update.message.from_user.id
+    user_id = str(update.message.from_user.id)
     if user_id != ADMIN_ID:
         return
 
@@ -292,8 +295,8 @@ def handle_text(update, context):
 
     try:
         target_id = int(update.message.text.strip())
-    except:
-        update.message.reply_text("❌ معرف غير صالح.")
+    except ValueError:
+        update.message.reply_text("❌ معرف غير صالح. الرجاء إرسال رقم.")
         return
 
     if action == 'add_user':
@@ -347,8 +350,9 @@ def get_file(file_id):
 # ======== Webhook ========
 @app.route("/", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
+    if request.method == "POST":
+        update = Update.de_json(request.get_json(force=True), bot)
+        dispatcher.process_update(update)
     return "OK", 200
 
 # ======== اختبار Flask ========
@@ -367,13 +371,17 @@ def test_alert():
 
 # ======== ميزة الإحصائيات الجديدة ========
 def show_stats(update, context):
-    user_id = update.message.from_user.id
+    user_id = str(update.message.from_user.id)
     if user_id != ADMIN_ID:
         update.message.reply_text("❌ ليس لديك صلاحية الوصول إلى الإحصائيات.")
         return
     
-    total_users_count = users_collection.count_documents({"is_allowed": True}) if client else 0
-    total_activity_logs = activity_collection.count_documents({}) if client else 0
+    if not mongo_client_active:
+        update.message.reply_text("❌ لا يمكن الوصول إلى قاعدة البيانات.")
+        return
+    
+    total_users_count = users_collection.count_documents({"is_allowed": True})
+    total_activity_logs = activity_collection.count_documents({})
     
     stats_text = (
         "📊 **إحصائيات البوت:**\n\n"
