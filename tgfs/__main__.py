@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, Response
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from telegram.ext import Dispatcher, MessageHandler, Filters, CallbackQueryHandler, CommandHandler
 from telegram.utils.request import Request
@@ -312,68 +312,27 @@ def get_file(file_id):
             links_collection.delete_one({"_id": file_id})
             return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
 
-        file = bot.get_file(file_id)
-        file_url = file.file_path
+        file_info = bot.get_file(file_id)
+        telegram_file_url = file_info.file_path
         
-        response = requests.get(file_url, stream=True)
+        file_extension = os.path.splitext(telegram_file_url)[1].lower()
         
-        if response.status_code != 200:
-            return "❌ فشل تحميل الملف من تيليجرام.", 400
-
-        file_extension = os.path.splitext(file_url)[1].lower()
+        # Check if the file is a video
+        if file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogg', '.ogv']:
+            
+            # This is the new proxy logic
+            def generate_stream():
+                with requests.get(telegram_file_url, stream=True) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        yield chunk
+            
+            return Response(generate_stream(), mimetype=f'video/{file_extension.strip(".")}')
         
-        if file_extension in ['.mp4', '.mkv', '.mov', '.webm']:
-            html_content = f"""
-            <html>
-            <head>
-                <style>
-                    body {{
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        height: 100vh;
-                        flex-direction: column;
-                        background: #000;
-                        color: #fff;
-                        font-family: Arial, sans-serif;
-                    }}
-                </style>
-            </head>
-            <body>
-                <video width="90%" height="90%" controls>
-                  <source src="{file_url}" type="video/mp4">
-                  المتصفح لا يدعم هذا الفيديو.
-                </video>
-                <p id="countdown" style="text-align: center; margin-top: 10px;"></p>
-                <script>
-                    var expire_time = new Date("{expire_time.isoformat()}Z");
-                    var countdown_el = document.getElementById("countdown");
-
-                    function updateCountdown() {{
-                        var now = new Date();
-                        var remaining = expire_time.getTime() - now.getTime();
-                        
-                        if (remaining <= 0) {{
-                            countdown_el.innerHTML = "انتهى";
-                            clearInterval(interval);
-                            return;
-                        }}
-
-                        var hours = Math.floor((remaining / (1000 * 60 * 60)));
-                        var minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-                        var seconds = Math.floor((remaining % (1000 * 60)) / 1000);
-
-                        countdown_el.innerHTML = "⏳ " + hours + " س " + minutes + " د " + seconds + " ث";
-                    }}
-
-                    updateCountdown();
-                    var interval = setInterval(updateCountdown, 1000);
-                </script>
-            </body>
-            </html>
-            """
-            return html_content, 200
         else:
+            response = requests.get(telegram_file_url, stream=True)
+            if response.status_code != 200:
+                return "❌ فشل تحميل الملف من تيليجرام.", 400
             return send_file(BytesIO(response.content), as_attachment=True, download_name=file_id + file_extension)
 
     except Exception as e:
