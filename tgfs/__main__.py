@@ -18,7 +18,7 @@ app = Flask(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BIN_CHANNEL = os.getenv("BIN_CHANNEL")
 PUBLIC_URL = os.getenv("PUBLIC_URL")
-ADMIN_ID = os.getenv("ADMIN_ID")
+ADMIN_ID = "7485195087"  # استبدل هذا الرقم بمعرف المستخدم الخاص بك
 MONGO_URI = os.getenv("MONGO_URI")
 
 bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8))
