@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request
+from flask import Flask, request, send_file
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from telegram.ext import Dispatcher, MessageHandler, Filters, CallbackQueryHandler, CommandHandler
 from telegram.utils.request import Request
@@ -10,6 +10,7 @@ from threading import Thread
 import time
 from pymongo import MongoClient
 import urllib.parse
+import requests
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -31,6 +32,7 @@ try:
     users_collection = db.get_collection("users")
     settings_collection = db.get_collection("settings")
     activity_collection = db.get_collection("activity_log")
+    links_collection = db.get_collection("links")  # إضافة مجموعة جديدة
     
     if settings_collection.count_documents({}) == 0:
         settings_collection.insert_one({"_id": "global_settings", "public_mode": False, "notifications_enabled": True})
@@ -106,8 +108,6 @@ def generate_qr(url):
     bio.seek(0)
     return bio
 
-temporary_links = {}
-
 def format_time_left(expire_time):
     remaining = expire_time - datetime.now()
     if remaining.total_seconds() <= 0:
@@ -115,23 +115,6 @@ def format_time_left(expire_time):
     hours, remainder = divmod(int(remaining.total_seconds()), 3600)
     minutes, _ = divmod(remainder, 60)
     return f"⏳ {hours} س {minutes} د"
-
-def update_time_left_message(chat_id, message_id, file_id):
-    while file_id in temporary_links:
-        remaining = format_time_left(temporary_links[file_id])
-        try:
-            bot.edit_message_reply_markup(
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📥 تحميل الملف", url=f"{PUBLIC_URL}/get_file/{file_id}"),
-                    InlineKeyboardButton("🎬 مشاهدة الفيديو", url=f"{PUBLIC_URL}/get_file/{file_id}"),
-                    InlineKeyboardButton(remaining, callback_data="time_left_disabled")
-                ]])
-            )
-        except:
-            pass
-        time.sleep(60)
 
 # ======== /start مع لوحة المستخدم ========
 def start(update, context):
@@ -209,8 +192,13 @@ def handle_file(update, context):
             update.message.reply_text("⚠️ الملف كبير جدًا (>100MB)، قد يستغرق رفعه وقت أطول.")
 
         expire_time = datetime.now() + timedelta(hours=24)
-        temporary_links[file_id] = expire_time
         
+        # حفظ الرابط في قاعدة البيانات
+        links_collection.insert_one({
+            "_id": file_id,
+            "expire_time": expire_time
+        })
+
         file_url = f"{PUBLIC_URL}/get_file/{file_id}"
         qr_image = generate_qr(file_url)
 
@@ -233,8 +221,6 @@ def handle_file(update, context):
             f"الحجم: `{file_size / (1024 * 1024):.2f}` ميجابايت"
         )
         send_alert(alert_message, file_url)
-
-        Thread(target=update_time_left_message, args=(update.message.chat_id, sent_msg.message_id, file_id), daemon=True).start()
 
     except Exception as e:
         update.message.reply_text(f"❌ حدث خطأ: {e}")
@@ -318,45 +304,34 @@ def handle_text(update, context):
 @app.route("/get_file/<file_id>", methods=["GET"])
 def get_file(file_id):
     try:
-        if file_id not in temporary_links:
+        # التحقق من الرابط في قاعدة البيانات
+        link_doc = links_collection.find_one({"_id": file_id})
+        if not link_doc:
             return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
 
-        if datetime.now() > temporary_links[file_id]:
-            del temporary_links[file_id]
+        expire_time = link_doc["expire_time"]
+        if datetime.now() > expire_time:
+            links_collection.delete_one({"_id": file_id})
             return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
 
         file = bot.get_file(file_id)
         file_url = file.file_path
-        remaining = format_time_left(temporary_links[file_id])
+        remaining = format_time_left(expire_time)
 
-        # قام هذا الجزء بإصلاح المشكلة.
+        response = requests.get(file_url, stream=True)
+        
+        if response.status_code != 200:
+            return "❌ فشل تحميل الملف من تيليجرام.", 400
+
         file_extension = os.path.splitext(file_url)[1].lower()
-        mime_types = {
-            ".mp4": "video/mp4",
-            ".mkv": "video/x-matroska",
-            ".mov": "video/quicktime",
-            ".webm": "video/webm",
-        }
-        mime_type = mime_types.get(file_extension, "video/mp4")
-
-        if file_extension in mime_types:
-            html_content = f"""
-            <html>
-            <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column; background: #000; color: #fff;">
-            <video width="90%" height="90%" controls>
-              <source src="{file_url}" type="{mime_type}">
-              المتصفح لا يدعم هذا الفيديو.
-            </video>
-            <p style="text-align: center;">{remaining}</p>
-            </body>
-            </html>
-            """
-            return html_content, 200
+        
+        if file_extension in ['.mp4', '.mkv', '.mov', '.webm']:
+            return send_file(BytesIO(response.content), mimetype="video/mp4")
         else:
-            return f"<a href='{file_url}'>اضغط هنا لتحميل الملف</a> | {remaining}", 200
+            return send_file(BytesIO(response.content), as_attachment=True, download_name=file_id + file_extension)
+
     except Exception as e:
         return f"حدث خطأ: {e}", 400
-
 
 # ======== Webhook ========
 @app.route("/", methods=["POST"])
