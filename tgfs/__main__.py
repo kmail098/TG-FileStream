@@ -161,29 +161,45 @@ def handle_file(update, context):
     msg = update.message
     file_id = None
     file_size = 0
+    file_name = "ملف غير معروف"
 
     try:
+        # **ميزة تسجيل المستخدمين الجدد**
+        if not users_collection.find_one({"user_id": user_id}):
+            add_user(user_id)
+            new_user_alert = (
+                f"👤 مستخدم جديد!\n\n"
+                f"المعرف: `{msg.from_user.id}`\n"
+                f"الاسم: `{msg.from_user.first_name}`"
+            )
+            send_alert(new_user_alert)
+            log_activity(f"New user {msg.from_user.id} registered")
+
         file_type = ""
         if msg.photo:
             sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=msg.photo[-1].file_id)
             file_id = sent.photo[-1].file_id
             file_size = msg.photo[-1].file_size
             file_type = "صورة"
+            file_name = msg.photo[-1].file_unique_id + ".jpg"
         elif msg.video:
             sent = bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
             file_id = sent.video.file_id
             file_size = msg.video.file_size
             file_type = "فيديو"
+            file_name = msg.video.file_name if msg.video.file_name else msg.video.file_unique_id + ".mp4"
         elif msg.audio:
             sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=msg.audio.file_id)
             file_id = sent.audio.file_id
             file_size = msg.audio.file_size
             file_type = "ملف صوتي"
+            file_name = msg.audio.file_name if msg.audio.file_name else msg.audio.file_unique_id + ".mp3"
         elif msg.document:
             sent = bot.send_document(chat_id=BIN_CHANNEL, document=msg.document.file_id)
             file_id = sent.document.file_id
             file_size = msg.document.file_size
             file_type = "مستند"
+            file_name = msg.document.file_name if msg.document.file_name else msg.document.file_unique_id + ".dat"
         else:
             update.message.reply_text("❌ لم يتم التعرف على الملف.")
             return
@@ -195,7 +211,9 @@ def handle_file(update, context):
         
         links_collection.insert_one({
             "_id": file_id,
-            "expire_time": expire_time
+            "expire_time": expire_time,
+            "file_name": file_name,
+            "file_size": file_size
         })
 
         file_url = f"{PUBLIC_URL}/get_file/{file_id}"
@@ -299,7 +317,7 @@ def handle_text(update, context):
 
     context.user_data['action'] = None
 
-# ======== مسار التحميل / المشاهدة مع عداد الوقت ========
+# ======== مسار صفحة الملفات ========
 @app.route("/get_file/<file_id>", methods=["GET"])
 def get_file(file_id):
     try:
@@ -308,33 +326,177 @@ def get_file(file_id):
             return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
 
         expire_time = link_doc["expire_time"]
+        file_name = link_doc.get("file_name", "الملف")
+        file_size = link_doc.get("file_size", 0)
+
         if datetime.now() > expire_time:
             links_collection.delete_one({"_id": file_id})
             return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
 
         file_info = bot.get_file(file_id)
+        file_extension = os.path.splitext(file_info.file_path)[1].lower()
+        
+        is_video = file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogg', '.ogv']
+        stream_url = f"{PUBLIC_URL}/stream_video/{file_id}" if is_video else f"{PUBLIC_URL}/download_file/{file_id}"
+        
+        html_content = f"""
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{file_name}</title>
+            <style>
+                body {{
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    flex-direction: column;
+                    background: #121212;
+                    color: #e0e0e0;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    text-align: center;
+                    margin: 0;
+                    padding: 20px;
+                }}
+                .container {{
+                    max-width: 90%;
+                    width: 600px;
+                    background: #1e1e1e;
+                    border-radius: 12px;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+                    padding: 20px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                }}
+                h1 {{
+                    font-size: 1.5em;
+                    color: #ffffff;
+                    margin-bottom: 10px;
+                }}
+                video, img {{
+                    max-width: 100%;
+                    border-radius: 8px;
+                    margin-top: 15px;
+                }}
+                .info {{
+                    margin-top: 15px;
+                    font-size: 0.9em;
+                    color: #b0b0b0;
+                }}
+                .countdown-timer {{
+                    font-size: 1.2em;
+                    color: #4CAF50;
+                    margin-top: 20px;
+                }}
+                .button-group {{
+                    margin-top: 20px;
+                    display: flex;
+                    gap: 15px;
+                    justify-content: center;
+                }}
+                .btn {{
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    text-decoration: none;
+                    font-weight: bold;
+                    transition: background-color 0.3s;
+                }}
+                .btn-download {{
+                    background-color: #007bff;
+                    color: #ffffff;
+                }}
+                .btn-download:hover {{
+                    background-color: #0056b3;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>{file_name}</h1>
+                <div class="info">الحجم: {file_size / (1024*1024):.2f} ميجابايت</div>
+                {"<video controls autoplay><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'>متصفحك لا يدعم الفيديو.</video>" if is_video else "<a href='" + stream_url + "' class='btn btn-download'>تحميل الملف</a>"}
+                <p id="countdown" class="countdown-timer"></p>
+                <div class="button-group">
+                    <a href="{stream_url}" class="btn btn-download">
+                        {"مشاهدة الفيديو" if is_video else "تحميل الملف"}
+                    </a>
+                </div>
+            </div>
+
+            <script>
+                var expire_time = new Date("{expire_time.isoformat()}Z");
+                var countdown_el = document.getElementById("countdown");
+
+                function updateCountdown() {{
+                    var now = new Date();
+                    var remaining = expire_time.getTime() - now.getTime();
+                    
+                    if (remaining <= 0) {{
+                        countdown_el.innerHTML = "انتهى";
+                        clearInterval(interval);
+                        return;
+                    }}
+
+                    var hours = Math.floor((remaining / (1000 * 60 * 60)));
+                    var minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+                    var seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+                    countdown_el.innerHTML = "⏳ " + hours + " س " + minutes + " د " + seconds + " ث";
+                }}
+
+                updateCountdown();
+                var interval = setInterval(updateCountdown, 1000);
+            </script>
+        </body>
+        </html>
+        """
+        return html_content, 200
+
+    except Exception as e:
+        return f"حدث خطأ: {e}", 400
+
+# ======== مسار تحميل الملف (للملفات غير الفيديو) ========
+@app.route("/download_file/<file_id>", methods=["GET"])
+def download_file(file_id):
+    try:
+        link_doc = links_collection.find_one({"_id": file_id})
+        if not link_doc:
+            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+
+        expire_time = link_doc["expire_time"]
+        file_name = link_doc.get("file_name", "الملف")
+        if datetime.now() > expire_time:
+            links_collection.delete_one({"_id": file_id})
+            return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
+        
+        file_info = bot.get_file(file_id)
         telegram_file_url = file_info.file_path
         
-        file_extension = os.path.splitext(telegram_file_url)[1].lower()
-        
-        # Check if the file is a video
-        if file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogg', '.ogv']:
-            
-            # This is the new proxy logic
-            def generate_stream():
-                with requests.get(telegram_file_url, stream=True) as r:
-                    r.raise_for_status()
-                    for chunk in r.iter_content(chunk_size=8192):
-                        yield chunk
-            
-            return Response(generate_stream(), mimetype=f'video/{file_extension.strip(".")}')
-        
-        else:
-            response = requests.get(telegram_file_url, stream=True)
-            if response.status_code != 200:
-                return "❌ فشل تحميل الملف من تيليجرام.", 400
-            return send_file(BytesIO(response.content), as_attachment=True, download_name=file_id + file_extension)
+        response = requests.get(telegram_file_url)
+        return send_file(BytesIO(response.content), as_attachment=True, download_name=file_name)
+    except Exception as e:
+        return f"حدث خطأ: {e}", 400
 
+# ======== مسار تشغيل الفيديو (الخادم الوسيط) ========
+@app.route("/stream_video/<file_id>", methods=["GET"])
+def stream_video(file_id):
+    try:
+        link_doc = links_collection.find_one({"_id": file_id})
+        if not link_doc or datetime.now() > link_doc["expire_time"]:
+            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+            
+        file_info = bot.get_file(file_id)
+        telegram_file_url = file_info.file_path
+        file_extension = os.path.splitext(telegram_file_url)[1].lower()
+
+        def generate_stream():
+            with requests.get(telegram_file_url, stream=True) as r:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=8192):
+                    yield chunk
+        
+        return Response(generate_stream(), mimetype=f'video/{file_extension.strip(".")}')
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
