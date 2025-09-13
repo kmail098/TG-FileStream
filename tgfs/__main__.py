@@ -342,9 +342,10 @@ def get_file(file_id):
         html_content = f"""
         <html>
         <head>
+            <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{file_name}</title>
-            <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet" />
+            <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
             <style>
                 body {{
                     background-color: #0d0d0d;
@@ -389,7 +390,7 @@ def get_file(file_id):
                     font-weight: bold;
                     margin-top: 10px;
                 }}
-                .video-js {{
+                .video-player {{
                     width: 100%;
                     height: auto;
                     border-radius: 8px;
@@ -417,12 +418,13 @@ def get_file(file_id):
                     <p>الحجم: {file_size / (1024*1024):.2f} ميجابايت</p>
                     <p id="countdown" class="countdown-timer"></p>
                 </div>
-                {"<video id='my-video' class='video-js vjs-theme-sea' controls preload='auto' data-setup='{{}}'><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'></video>" if is_video else ""}
+                {"<video id='player' playsinline controls class='video-player'><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'></video>" if is_video else ""}
                 {"<a href='" + stream_url + "' class='download-btn'>تحميل الملف</a>" if not is_video else ""}
             </div>
 
-            <script src="https://vjs.zencdn.net/7.20.3/video.min.js"></script>
+            <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
             <script>
+                const player = new Plyr('#player');
                 var expire_time = new Date("{expire_time.isoformat()}Z");
                 var countdown_el = document.getElementById("countdown");
 
