@@ -16,6 +16,8 @@ from dashboard import init_dashboard
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "1qaz@xsw2$3edc@vfr4")
+app.config["ADMIN_PASS"] = os.getenv("ADMIN_PASS", "0plm$nko9$8ijb")
 
 # ======== إعداد المتغيرات والـ Bot ========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
