@@ -344,86 +344,84 @@ def get_file(file_id):
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{file_name}</title>
+            <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet" />
             <style>
                 body {{
+                    background-color: #0d0d0d;
+                    color: #fff;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                     display: flex;
                     justify-content: center;
                     align-items: center;
                     height: 100vh;
-                    flex-direction: column;
-                    background: #121212;
-                    color: #e0e0e0;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    text-align: center;
                     margin: 0;
+                    flex-direction: column;
                     padding: 20px;
                 }}
                 .container {{
-                    max-width: 90%;
-                    width: 600px;
-                    background: #1e1e1e;
+                    max-width: 900px;
+                    width: 100%;
+                    background-color: #1a1a1a;
                     border-radius: 12px;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
                     padding: 20px;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
                     display: flex;
                     flex-direction: column;
                     align-items: center;
                 }}
-                h1 {{
-                    font-size: 1.5em;
-                    color: #ffffff;
-                    margin-bottom: 10px;
-                }}
-                video, img {{
-                    max-width: 100%;
-                    border-radius: 8px;
-                    margin-top: 15px;
-                }}
                 .info {{
-                    margin-top: 15px;
+                    margin-bottom: 20px;
+                    text-align: center;
+                }}
+                .info h1 {{
+                    font-size: 1.8em;
+                    margin: 0;
+                    color: #fff;
+                }}
+                .info p {{
                     font-size: 0.9em;
-                    color: #b0b0b0;
+                    color: #ccc;
+                    margin: 5px 0 0;
                 }}
                 .countdown-timer {{
                     font-size: 1.2em;
                     color: #4CAF50;
-                    margin-top: 20px;
+                    font-weight: bold;
+                    margin-top: 10px;
                 }}
-                .button-group {{
-                    margin-top: 20px;
-                    display: flex;
-                    gap: 15px;
-                    justify-content: center;
-                }}
-                .btn {{
-                    padding: 12px 24px;
+                .video-js {{
+                    width: 100%;
+                    height: auto;
                     border-radius: 8px;
+                }}
+                .download-btn {{
+                    display: inline-block;
+                    margin-top: 20px;
+                    padding: 12px 24px;
+                    background-color: #007bff;
+                    color: #fff;
                     text-decoration: none;
+                    border-radius: 6px;
                     font-weight: bold;
                     transition: background-color 0.3s;
                 }}
-                .btn-download {{
-                    background-color: #007bff;
-                    color: #ffffff;
-                }}
-                .btn-download:hover {{
+                .download-btn:hover {{
                     background-color: #0056b3;
                 }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>{file_name}</h1>
-                <div class="info">الحجم: {file_size / (1024*1024):.2f} ميجابايت</div>
-                {"<video controls autoplay><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'>متصفحك لا يدعم الفيديو.</video>" if is_video else "<a href='" + stream_url + "' class='btn btn-download'>تحميل الملف</a>"}
-                <p id="countdown" class="countdown-timer"></p>
-                <div class="button-group">
-                    <a href="{stream_url}" class="btn btn-download">
-                        {"مشاهدة الفيديو" if is_video else "تحميل الملف"}
-                    </a>
+                <div class="info">
+                    <h1>{file_name}</h1>
+                    <p>الحجم: {file_size / (1024*1024):.2f} ميجابايت</p>
+                    <p id="countdown" class="countdown-timer"></p>
                 </div>
+                {"<video id='my-video' class='video-js vjs-theme-sea' controls preload='auto' data-setup='{{}}'><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'></video>" if is_video else ""}
+                {"<a href='" + stream_url + "' class='download-btn'>تحميل الملف</a>" if not is_video else ""}
             </div>
 
+            <script src="https://vjs.zencdn.net/7.20.3/video.min.js"></script>
             <script>
                 var expire_time = new Date("{expire_time.isoformat()}Z");
                 var countdown_el = document.getElementById("countdown");
