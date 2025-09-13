@@ -12,6 +12,7 @@ from pymongo import MongoClient
 from threading import Thread
 import time
 import traceback
+from dashboard import init_dashboard
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
