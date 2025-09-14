@@ -116,14 +116,6 @@ def format_time_left(expire_time):
     minutes, _ = divmod(remainder, 60)
     return f"⏳ {hours} س {minutes} د"
 
-def format_file_size(size_in_bytes):
-    if size_in_bytes < 1024:
-        return f"{size_in_bytes} بايت"
-    elif size_in_bytes < 1024 * 1024:
-        return f"{size_in_bytes / 1024:.2f} كيلوبايت"
-    else:
-        return f"{size_in_bytes / (1024 * 1024):.2f} ميجابايت"
-
 # ======== /start مع لوحة المستخدم ========
 def start(update, context):
     user_id = update.message.from_user.id
@@ -247,7 +239,7 @@ def handle_file(update, context):
             f"المستخدم: `{msg.from_user.first_name}` ({msg.from_user.id})\n"
             f"العملية: رفع {file_type}\n"
             f"الوقت: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n"
-            f"الحجم: `{format_file_size(file_size)}`"
+            f"الحجم: `{file_size / (1024 * 1024):.2f}` ميجابايت"
         )
         send_alert(alert_message, file_url)
 
@@ -350,12 +342,7 @@ def get_file(file_id):
         file_extension = os.path.splitext(file_info.file_path)[1].lower()
         
         is_video = file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogg', '.ogv']
-        
-        if not is_video:
-            download_url = f"{PUBLIC_URL}/download_file/{file_id}"
-            return redirect(download_url)
-            
-        stream_url = f"{PUBLIC_URL}/stream_video/{file_id}"
+        stream_url = f"{PUBLIC_URL}/stream_video/{file_id}" if is_video else f"{PUBLIC_URL}/download_file/{file_id}"
         thumbnail_url = f"{PUBLIC_URL}/get_thumbnail/{thumb_id}" if thumb_id else ""
         
         html_content = f"""
@@ -449,16 +436,14 @@ def get_file(file_id):
             <div class="container">
                 <div class="info">
                     <h1>{file_name}</h1>
-                    <p>الحجم: {format_file_size(file_size)}</p>
+                    <p>الحجم: {file_size / (1024*1024):.2f} ميجابايت</p>
                     <p id="countdown" class="countdown-timer"></p>
                 </div>
-                <video id='player' playsinline controls class='video-player' poster='{thumbnail_url}'>
-                    <source src='{stream_url}' type='video/{file_extension.strip(".")}'></source>
-                </video>
+                {"<video id='player' playsinline controls class='video-player' poster='" + thumbnail_url + "'><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'></video>" if is_video else ""}
                 <div class="button-group">
                     <a href="{stream_url}" class="btn">
                         <i class="fas fa-download"></i>
-                        تحميل الفيديو
+                        {"تحميل الملف" if not is_video else "تحميل الفيديو"}
                     </a>
                     <button class="btn" onclick="copyLink()">
                         <i class="fas fa-share-alt"></i>
@@ -538,32 +523,15 @@ def stream_video(file_id):
             
         file_info = bot.get_file(file_id)
         telegram_file_url = file_info.file_path
+        file_extension = os.path.splitext(telegram_file_url)[1].lower()
+
+        def generate_stream():
+            with requests.get(telegram_file_url, stream=True) as r:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=8192):
+                    yield chunk
         
-        range_header = request.headers.get('Range', None)
-        if range_header:
-            # Handle partial content request for seeking
-            start, end = 0, None
-            m = re.search(r'bytes=(\d+)-(\d*)', range_header)
-            if m:
-                start = int(m.group(1))
-                if m.group(2):
-                    end = int(m.group(2))
-            
-            headers = {"Range": range_header}
-            r = requests.get(telegram_file_url, headers=headers, stream=True)
-            
-            # Send partial content
-            response = Response(r.iter_content(chunk_size=8192), status=r.status_code)
-            response.headers.update(r.headers)
-            return response
-        else:
-            # Full content stream
-            def generate_stream():
-                with requests.get(telegram_file_url, stream=True) as r:
-                    r.raise_for_status()
-                    for chunk in r.iter_content(chunk_size=8192):
-                        yield chunk
-            return Response(generate_stream(), mimetype='video/mp4')
+        return Response(generate_stream(), mimetype=f'video/{file_extension.strip(".")}')
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
