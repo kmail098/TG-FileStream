@@ -1,4 +1,4 @@
-# main.py (مُحسّن - نسخة كاملة)
+# main.py (مُحسّن - نسخة كاملة مع روابط آمنة بتوكنات)
 import os
 from flask import Flask, request, send_file, Response, jsonify
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
@@ -12,12 +12,10 @@ from pymongo import MongoClient
 from threading import Thread
 import time
 import traceback
-from dashboard import init_dashboard
+import uuid  # إضافة لإنشاء توكنات آمنة
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "1qaz@xsw2$3edc@vfr4")
-app.config["ADMIN_PASS"] = os.getenv("ADMIN_PASS", "0plm$nko9$8ijb")
 
 # ======== إعداد المتغيرات والـ Bot ========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -61,8 +59,7 @@ except Exception as e:
     mongo_client_active = False
 
 # ======== بنى بيانات داخلية (fallback) ========
-# سوف نخزن في الذاكرة نسخة من الروابط للسرعة، ونزامنها مع DB عند الإمكان
-# structure: links_memory[file_id] = {expire_time, file_name, file_size, uploader, views, expired}
+# structure: links_memory[file_id] = {expire_time, file_name, file_size, uploader, views, expired, token}
 links_memory = {}
 
 # load from DB at startup (if possible)
@@ -76,7 +73,8 @@ if mongo_client_active:
                 "file_size": doc.get("file_size"),
                 "uploader": doc.get("uploader"),
                 "views": doc.get("views", 0),
-                "expired": doc.get("expired", False)
+                "expired": doc.get("expired", False),
+                "token": doc.get("token")  # إضافة التوكن
             }
         print("✅ تم استرجاع روابط غير منتهية من MongoDB")
     except Exception as e:
@@ -114,7 +112,6 @@ def add_user_to_db(user_id):
         return False
 
 def is_allowed_user(user_id):
-    # إذا Mongo غير متاح، فقط الأدمن مسموح (يمكنك تغيير هذا السلوك)
     if not mongo_client_active:
         return int(user_id) == ADMIN_ID
     if get_setting("public_mode"):
@@ -146,7 +143,7 @@ def format_time_left(expire_time):
     return f"⏳ {hours}س {minutes}د {seconds}ث"
 
 # ======== تحديث زر الوقت في رسالة تليجرام كل 30 ثانية ========
-def background_update_button(chat_id, message_id, file_id, stop_on_expire=True, interval=30):
+def background_update_button(chat_id, message_id, file_id, token, stop_on_expire=True, interval=30):
     try:
         while True:
             info = links_memory.get(file_id)
@@ -167,14 +164,13 @@ def background_update_button(chat_id, message_id, file_id, stop_on_expire=True, 
                 break
             remaining = format_time_left(expire)
             keyboard = [
-                [InlineKeyboardButton("📥 تحميل", url=f"{PUBLIC_URL}/get_file/{file_id}"),
-                 InlineKeyboardButton("🎬 مشاهدة", url=f"{PUBLIC_URL}/get_file/{file_id}")],
+                [InlineKeyboardButton("📥 تحميل", url=f"{PUBLIC_URL}/get_file/{file_id}/{token}"),
+                 InlineKeyboardButton("🎬 مشاهدة", url=f"{PUBLIC_URL}/get_file/{file_id}/{token}")],
                 [InlineKeyboardButton(f"⏱ {remaining}", callback_data="time_left_disabled")]
             ]
             try:
                 bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=InlineKeyboardMarkup(keyboard))
             except Exception:
-                # ممكن يكون المستخدم حذف الرسالة أو لا يملك صلاحية التعديل، تجاهل
                 pass
             time.sleep(interval)
     except Exception as e:
@@ -184,7 +180,6 @@ def background_update_button(chat_id, message_id, file_id, stop_on_expire=True, 
 def start(update, context):
     try:
         user_id = update.message.from_user.id
-        # تسجيل مستخدم جديد إن لم يكن مسجلاً (خيار)
         if mongo_client_active and not users_collection.find_one({"user_id": user_id}):
             add_user_to_db(user_id)
             log_activity(f"New user registered: {user_id}")
@@ -212,7 +207,6 @@ def start(update, context):
             update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
             return
 
-        # عرض آخر 5 ملفات إذا وجدت
         files = [fid for fid, info in links_memory.items() if info.get("uploader") == user_id]
         last5 = files[-5:]
         if not last5:
@@ -227,9 +221,10 @@ def start(update, context):
             time_text = format_time_left(info.get("expire_time"))
             views = info.get("views", 0)
             size_mb = f"{info.get('file_size',0)/(1024*1024):.2f}"
+            token = info.get("token", "")
             message += f"- {info.get('file_name','ملف')} | {size_mb}MB | {views} مشاهدات | {time_text}\n"
-            buttons.append([InlineKeyboardButton("📥 تحميل", url=f"{PUBLIC_URL}/get_file/{fid}"),
-                            InlineKeyboardButton("🎬 مشاهدة", url=f"{PUBLIC_URL}/get_file/{fid}"),
+            buttons.append([InlineKeyboardButton("📥 تحميل", url=f"{PUBLIC_URL}/get_file/{fid}/{token}"),
+                            InlineKeyboardButton("🎬 مشاهدة", url=f"{PUBLIC_URL}/get_file/{fid}/{token}"),
                             InlineKeyboardButton(time_text, callback_data="time_left_disabled")])
         update.message.reply_text(message, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
     except Exception as e:
@@ -248,7 +243,6 @@ def handle_file(update, context):
         file_size = 0
         file_name = "file"
 
-        # Determine file and forward to BIN channel (archive)
         if msg.photo:
             sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=msg.photo[-1].file_id)
             file_id = sent.photo[-1].file_id
@@ -281,15 +275,17 @@ def handle_file(update, context):
             update.message.reply_text("⚠️ الملف كبير جدًا (>100MB)، قد يستغرق رفعه وقت أطول.")
 
         expire_time = datetime.now() + timedelta(hours=24)
+        token = str(uuid.uuid4())  # إنشاء توكن آمن
 
-        # حفظ في DB وذاكرة
+        # حفظ في DB وذاكرة مع التوكن
         links_memory[file_id] = {
             "expire_time": expire_time,
             "file_name": file_name,
             "file_size": file_size,
             "uploader": user_id,
             "views": 0,
-            "expired": False
+            "expired": False,
+            "token": token
         }
         if mongo_client_active:
             try:
@@ -299,12 +295,13 @@ def handle_file(update, context):
                     "file_size": file_size,
                     "uploader": user_id,
                     "views": 0,
-                    "expired": False
+                    "expired": False,
+                    "token": token
                 }}, upsert=True)
             except Exception as e:
                 print("⚠️ خطأ حفظ الروابط في Mongo:", e)
 
-        file_url = f"{PUBLIC_URL}/get_file/{file_id}"
+        file_url = f"{PUBLIC_URL}/get_file/{file_id}/{token}"
         qr_bytes = generate_qr_bytes(file_url)
         remaining = format_time_left(expire_time)
 
@@ -313,7 +310,7 @@ def handle_file(update, context):
             [InlineKeyboardButton(f"⏱ {remaining}", callback_data="time_left_disabled")]
         ]
         sent_msg = update.message.reply_photo(qr_bytes, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=InlineKeyboardMarkup(keyboard))
-        log_activity(f"User {user_id} uploaded {file_id}")
+        log_activity(f"User {user_id} uploaded {file_id} with token {token}")
 
         # إشعار إلى القناة (alert)
         alert = f"المستخدم: `{msg.from_user.first_name}` ({user_id})\nرفع: {ftype}\nالاسم: `{file_name}`\nالحجم: `{file_size/(1024*1024):.2f} MB`"
@@ -325,7 +322,7 @@ def handle_file(update, context):
             print("⚠️ خطأ في إرسال إشعار:", e)
 
         # start background thread to update time button
-        Thread(target=background_update_button, args=(sent_msg.chat_id, sent_msg.message_id, file_id), daemon=True).start()
+        Thread(target=background_update_button, args=(sent_msg.chat_id, sent_msg.message_id, file_id, token), daemon=True).start()
 
     except Exception as e:
         print("خطأ في handle_file:", e, traceback.format_exc())
@@ -340,7 +337,6 @@ def button_handler(update, context):
         query = update.callback_query
         query.answer()
         if str(query.from_user.id) != str(ADMIN_ID):
-            # للمستخدمين العاديين لا نسمح بالتحكم الاداري هنا
             return
         if query.data == "public_on":
             update_setting("public_mode", True)
@@ -422,7 +418,6 @@ def time_left(file_id):
                     "file_size": doc.get("file_size"),
                     "views": doc.get("views", 0)
                 }
-                # cache
                 links_memory[file_id] = info
         if not info:
             return jsonify({"ok": False, "error": "not_found"}), 404
@@ -433,18 +428,21 @@ def time_left(file_id):
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ======== QR route ========
-@app.route("/qr/<file_id>", methods=["GET"])
-def qr_route(file_id):
+@app.route("/qr/<file_id>/<token>", methods=["GET"])  # إضافة token
+def qr_route(file_id, token):
     try:
-        url = f"{PUBLIC_URL}/get_file/{file_id}"
+        info = links_memory.get(file_id)
+        if not info or info.get("token") != token:
+            return "❌ توكن غير صالح.", 400
+        url = f"{PUBLIC_URL}/get_file/{file_id}/{token}"
         img = generate_qr_bytes(url)
         return Response(img.getvalue(), mimetype="image/png")
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
 # ======== صفحة مشاهدة الملف (احترافية باستخدام Plyr.js) ========
-@app.route("/get_file/<file_id>", methods=["GET"])
-def get_file_view(file_id):
+@app.route("/get_file/<file_id>/<token>", methods=["GET"])  # إضافة token
+def get_file_view(file_id, token):
     try:
         info = links_memory.get(file_id)
         if not info and mongo_client_active:
@@ -455,15 +453,15 @@ def get_file_view(file_id):
                     "file_name": doc.get("file_name"),
                     "file_size": doc.get("file_size"),
                     "uploader": doc.get("uploader"),
-                    "views": doc.get("views", 0)
+                    "views": doc.get("views", 0),
+                    "token": doc.get("token")
                 }
                 links_memory[file_id] = info
 
-        if not info:
-            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+        if not info or info.get("token") != token:
+            return "❌ الرابط أو التوكن غير صالح.", 400
 
         if info.get("expire_time") and datetime.now() > info.get("expire_time"):
-            # mark expired
             if mongo_client_active:
                 links_collection.update_one({"_id": file_id}, {"$set": {"expired": True}})
             try:
@@ -472,7 +470,6 @@ def get_file_view(file_id):
                 pass
             return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
 
-        # increment views
         info["views"] = info.get("views", 0) + 1
         if mongo_client_active:
             try:
@@ -480,7 +477,6 @@ def get_file_view(file_id):
             except Exception:
                 pass
 
-        # get telegram file url
         tgfile = bot.get_file(file_id)
         file_url = tgfile.file_path
         ext = os.path.splitext(file_url)[1].lower()
@@ -511,7 +507,7 @@ def get_file_view(file_id):
               <div class="container">
                 <div id="player-wrap">
                   <video id="player" playsinline controls crossorigin>
-                    <source src="{PUBLIC_URL}/stream_video/{file_id}" type="video/mp4" />
+                    <source src="{PUBLIC_URL}/stream_video/{file_id}/{token}" type="video/mp4" />
                   </video>
                 </div>
 
@@ -520,7 +516,7 @@ def get_file_view(file_id):
                   <div>
                     <span class="time" id="remaining">{remaining}</span>
                     &nbsp;
-                    <a class="btn" href="{PUBLIC_URL}/get_file/{file_id}" download>📥 تحميل</a>
+                    <a class="btn" href="{PUBLIC_URL}/get_file/{file_id}/{token}" download>📥 تحميل</a>
                   </div>
                 </div>
               </div>
@@ -547,19 +543,19 @@ def get_file_view(file_id):
             return Response(html, mimetype="text/html")
         else:
             # non-video -> provide download link
-            return f"<a href='{PUBLIC_URL}/download_file/{file_id}'>تحميل {info.get('file_name')}</a><br><small>{remaining} • المشاهدات: {views} • الحجم: {size_mb} MB</small>", 200
+            return f"<a href='{PUBLIC_URL}/download_file/{file_id}/{token}'>تحميل {info.get('file_name')}</a><br><small>{remaining} • المشاهدات: {views} • الحجم: {size_mb} MB</small>", 200
 
     except Exception as e:
         print("خطأ get_file_view:", e, traceback.format_exc())
         return f"حدث خطأ: {e}", 400
 
 # ======== download_file (non-video) ========
-@app.route("/download_file/<file_id>", methods=["GET"])
-def download_file(file_id):
+@app.route("/download_file/<file_id>/<token>", methods=["GET"])  # إضافة token
+def download_file(file_id, token):
     try:
         doc = links_memory.get(file_id) or (links_collection.find_one({"_id": file_id}) if mongo_client_active else None)
-        if not doc:
-            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+        if not doc or doc.get("token") != token:
+            return "❌ الرابط أو التوكن غير صالح.", 400
         expire_time = doc.get("expire_time")
         if expire_time and datetime.now() > expire_time:
             if mongo_client_active:
@@ -581,13 +577,12 @@ def download_file(file_id):
         return f"حدث خطأ: {e}", 400
 
 # ======== stream_video (supports streaming from telegram) ========
-@app.route("/stream_video/<file_id>", methods=["GET"])
-def stream_video(file_id):
+@app.route("/stream_video/<file_id>/<token>", methods=["GET"])  # إضافة token
+def stream_video(file_id, token):
     try:
-        # check valid
         doc = links_memory.get(file_id) or (links_collection.find_one({"_id": file_id}) if mongo_client_active else None)
-        if not doc:
-            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+        if not doc or doc.get("token") != token:
+            return "❌ الرابط أو التوكن غير صالح.", 400
         if doc.get("expire_time") and datetime.now() > doc.get("expire_time"):
             if mongo_client_active:
                 links_collection.update_one({"_id": file_id}, {"$set": {"expired": True}})
@@ -599,14 +594,12 @@ def stream_video(file_id):
 
         tgfile = bot.get_file(file_id)
         telegram_url = tgfile.file_path
-        # stream with chunked generator
         def generate():
             with requests.get(telegram_url, stream=True) as r:
                 r.raise_for_status()
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk:
                         yield chunk
-        # choose mimetype by extension
         ext = os.path.splitext(telegram_url)[1].lower().strip(".")
         mime = f"video/{ext if ext else 'mp4'}"
         return Response(generate(), mimetype=mime)
