@@ -352,4 +352,259 @@ def get_file(file_id):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{file_name}</title>
             <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-            <link rel="stylesheet" href="https://cdnjs.cloudflare.
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+            <style>
+                body {{
+                    background-color: #0d0d0d;
+                    color: #fff;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    height: 100vh;
+                    margin: 0;
+                    flex-direction: column;
+                    padding: 20px;
+                }}
+                .container {{
+                    max-width: 900px;
+                    width: 100%;
+                    background-color: #1a1a1a;
+                    border-radius: 12px;
+                    padding: 20px;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                }}
+                .info {{
+                    margin-bottom: 20px;
+                    text-align: center;
+                }}
+                .info h1 {{
+                    font-size: 1.8em;
+                    margin: 0;
+                    color: #fff;
+                }}
+                .info p {{
+                    font-size: 0.9em;
+                    color: #ccc;
+                    margin: 5px 0 0;
+                }}
+                .countdown-timer {{
+                    font-size: 1.2em;
+                    color: #4CAF50;
+                    font-weight: bold;
+                    margin-top: 10px;
+                }}
+                .video-player {{
+                    width: 100%;
+                    height: auto;
+                    border-radius: 8px;
+                    background-color: #000;
+                }}
+                .button-group {{
+                    display: flex;
+                    justify-content: center;
+                    gap: 15px;
+                    margin-top: 20px;
+                }}
+                .btn {{
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    padding: 12px 24px;
+                    background-color: #383838;
+                    color: #fff;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    transition: background-color 0.3s;
+                }}
+                .btn:hover {{
+                    background-color: #555;
+                }}
+                .plyr__controls {{
+                    background-color: rgba(26, 26, 26, 0.9) !important;
+                }}
+                .plyr--full-ui input[type=range] {{
+                    color: #e50914 !important;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="info">
+                    <h1>{file_name}</h1>
+                    <p>الحجم: {file_size / (1024*1024):.2f} ميجابايت</p>
+                    <p id="countdown" class="countdown-timer"></p>
+                </div>
+                {"<video id='player' playsinline controls class='video-player' poster='" + thumbnail_url + "'><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'></video>" if is_video else ""}
+                <div class="button-group">
+                    <a href="{stream_url}" class="btn">
+                        <i class="fas fa-download"></i>
+                        {"تحميل الملف" if not is_video else "تحميل الفيديو"}
+                    </a>
+                    <button class="btn" onclick="copyLink()">
+                        <i class="fas fa-share-alt"></i>
+                        <span>مشاركة</span>
+                    </button>
+                </div>
+            </div>
+
+            <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+            <script>
+                const player = new Plyr('#player');
+                var expire_time = new Date("{expire_time.isoformat()}Z");
+                var countdown_el = document.getElementById("countdown");
+
+                function updateCountdown() {{
+                    var now = new Date();
+                    var remaining = expire_time.getTime() - now.getTime();
+                    
+                    if (remaining <= 0) {{
+                        countdown_el.innerHTML = "انتهى";
+                        clearInterval(interval);
+                        return;
+                    }}
+
+                    var hours = Math.floor((remaining / (1000 * 60 * 60)));
+                    var minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+                    var seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+                    countdown_el.innerHTML = "⏳ " + hours + " س " + minutes + " د " + seconds + " ث";
+                }}
+
+                function copyLink() {{
+                    navigator.clipboard.writeText(window.location.href);
+                    alert("تم نسخ الرابط بنجاح!");
+                }}
+
+                updateCountdown();
+                var interval = setInterval(updateCountdown, 1000);
+            </script>
+        </body>
+        </html>
+        """
+        return html_content, 200
+
+    except Exception as e:
+        return f"حدث خطأ: {e}", 400
+
+# ======== مسار تحميل الملف (للملفات غير الفيديو) ========
+@app.route("/download_file/<file_id>", methods=["GET"])
+def download_file(file_id):
+    try:
+        link_doc = links_collection.find_one({"_id": file_id})
+        if not link_doc:
+            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+
+        expire_time = link_doc["expire_time"]
+        file_name = link_doc.get("file_name", "الملف")
+        if datetime.now() > expire_time:
+            links_collection.delete_one({"_id": file_id})
+            return "❌ الرابط انتهت صلاحيته بعد 24 ساعة.", 400
+        
+        file_info = bot.get_file(file_id)
+        telegram_file_url = file_info.file_path
+        
+        response = requests.get(telegram_file_url)
+        return send_file(BytesIO(response.content), as_attachment=True, download_name=file_name)
+    except Exception as e:
+        return f"حدث خطأ: {e}", 400
+
+# ======== مسار تشغيل الفيديو (الخادم الوسيط) ========
+@app.route("/stream_video/<file_id>", methods=["GET"])
+def stream_video(file_id):
+    try:
+        link_doc = links_collection.find_one({"_id": file_id})
+        if not link_doc or datetime.now() > link_doc["expire_time"]:
+            return "❌ الرابط غير صالح أو انتهت صلاحيته.", 400
+            
+        file_info = bot.get_file(file_id)
+        telegram_file_url = file_info.file_path
+        file_extension = os.path.splitext(telegram_file_url)[1].lower()
+
+        def generate_stream():
+            with requests.get(telegram_file_url, stream=True) as r:
+                r.raise_for_status()
+                for chunk in r.iter_content(chunk_size=8192):
+                    yield chunk
+        
+        return Response(generate_stream(), mimetype=f'video/{file_extension.strip(".")}')
+    except Exception as e:
+        return f"حدث خطأ: {e}", 400
+
+# ======== مسار عرض الصورة المصغرة ========
+@app.route("/get_thumbnail/<thumb_id>", methods=["GET"])
+def get_thumbnail(thumb_id):
+    try:
+        if not thumb_id:
+            return "❌ لا يوجد صورة معاينة.", 404
+        
+        file_info = bot.get_file(thumb_id)
+        telegram_file_url = file_info.file_path
+        
+        response = requests.get(telegram_file_url, stream=True)
+        return Response(response.iter_content(chunk_size=8192), content_type=response.headers['Content-Type'])
+    except Exception as e:
+        return f"حدث خطأ: {e}", 400
+
+
+# ======== Webhook ========
+@app.route("/", methods=["POST"])
+def webhook():
+    if request.method == "POST":
+        update = Update.de_json(request.get_json(force=True), bot)
+        dispatcher.process_update(update)
+    return "OK", 200
+
+# ======== اختبار Flask ========
+@app.route("/test", methods=["GET"])
+def test():
+    return "Flask يعمل على Vercel ✅", 200
+
+# ======== اختبار الإشعارات ========
+@app.route("/test_alert", methods=["GET"])
+def test_alert():
+    try:
+        bot.send_message(chat_id=BIN_CHANNEL, text="✅ هذا إشعار تجريبي ناجح!")
+        return "تم إرسال الإشعار التجريبي بنجاح إلى القناة.", 200
+    except Exception as e:
+        return f"❌ فشل إرسال الإشعار: {e}", 500
+
+# ======== ميزة الإحصائيات الجديدة ========
+def show_stats(update, context):
+    user_id = str(update.message.from_user.id)
+    if user_id != ADMIN_ID:
+        update.message.reply_text("❌ ليس لديك صلاحية الوصول إلى الإحصائيات.")
+        return
+    
+    if not mongo_client_active:
+        update.message.reply_text("❌ لا يمكن الوصول إلى قاعدة البيانات.")
+        return
+    
+    total_users_count = users_collection.count_documents({"is_allowed": True})
+    total_activity_logs = activity_collection.count_documents({})
+    
+    stats_text = (
+        "📊 **إحصائيات البوت:**\n\n"
+        f"**الوضع العام:** {'مفعل ✅' if get_setting('public_mode') else 'متوقف 🔒'}\n"
+        f"**عدد المستخدمين المسجلين:** {total_users_count} مستخدم\n"
+        f"**إجمالي عدد الأنشطة:** {total_activity_logs} نشاط\n"
+        "*(ملاحظة: هذه الإحصائيات دائمة ومحفوظة في قاعدة البيانات)*"
+    )
+    
+    update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+
+# ======== إضافة المعالجات ========
+dispatcher.add_handler(MessageHandler(Filters.document | Filters.video | Filters.audio | Filters.photo, handle_file))
+dispatcher.add_handler(CallbackQueryHandler(button_handler))
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("stats", show_stats))
+
+# ======== تشغيل التطبيق ========
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 3000))
+    app.run(host="0.0.0.0", port=port)
