@@ -116,6 +116,14 @@ def format_time_left(expire_time):
     minutes, _ = divmod(remainder, 60)
     return f"⏳ {hours} س {minutes} د"
 
+def format_file_size(size_in_bytes):
+    if size_in_bytes < 1024:
+        return f"{size_in_bytes} بايت"
+    elif size_in_bytes < 1024 * 1024:
+        return f"{size_in_bytes / 1024:.2f} كيلوبايت"
+    else:
+        return f"{size_in_bytes / (1024 * 1024):.2f} ميجابايت"
+
 # ======== /start مع لوحة المستخدم ========
 def start(update, context):
     user_id = update.message.from_user.id
@@ -239,7 +247,7 @@ def handle_file(update, context):
             f"المستخدم: `{msg.from_user.first_name}` ({msg.from_user.id})\n"
             f"العملية: رفع {file_type}\n"
             f"الوقت: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n"
-            f"الحجم: `{file_size / (1024 * 1024):.2f}` ميجابايت"
+            f"الحجم: `{format_file_size(file_size)}`"
         )
         send_alert(alert_message, file_url)
 
@@ -436,7 +444,7 @@ def get_file(file_id):
             <div class="container">
                 <div class="info">
                     <h1>{file_name}</h1>
-                    <p>الحجم: {file_size / (1024*1024):.2f} ميجابايت</p>
+                    <p>الحجم: {format_file_size(file_size)}</p>
                     <p id="countdown" class="countdown-timer"></p>
                 </div>
                 {"<video id='player' playsinline controls class='video-player' poster='" + thumbnail_url + "'><source src='" + stream_url + "' type='video/" + file_extension.strip(".") + "'></video>" if is_video else ""}
