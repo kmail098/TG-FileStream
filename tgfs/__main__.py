@@ -10,8 +10,6 @@ from io import BytesIO
 import requests
 from pymongo import MongoClient
 import urllib.parse
-from apscheduler.schedulers.background import BackgroundScheduler
-import time
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -36,7 +34,12 @@ try:
     links_collection = db.get_collection("links")
     
     if settings_collection.count_documents({}) == 0:
-        settings_collection.insert_one({"_id": "global_settings", "public_mode": False, "notifications_enabled": True})
+        settings_collection.insert_one({
+            "_id": "global_settings",
+            "public_mode": False,
+            "notifications_enabled": True,
+            "last_cleanup": datetime.now()
+        })
         
     print("✅ تم الاتصال بقاعدة بيانات MongoDB بنجاح.")
     mongo_client_active = True
@@ -174,7 +177,6 @@ def handle_file(update, context):
     thumb_id = None
 
     try:
-        # **ميزة تسجيل المستخدمين الجدد**
         if not users_collection.find_one({"user_id": user_id}):
             add_user(user_id)
             new_user_alert = (
@@ -542,7 +544,6 @@ def stream_video(file_id):
         
         range_header = request.headers.get('Range', None)
         if range_header:
-            # Handle partial content request for seeking
             start, end = 0, None
             m = re.search(r'bytes=(\d+)-(\d*)', range_header)
             if m:
@@ -553,12 +554,10 @@ def stream_video(file_id):
             headers = {"Range": range_header}
             r = requests.get(telegram_file_url, headers=headers, stream=True)
             
-            # Send partial content
             response = Response(r.iter_content(chunk_size=8192), status=r.status_code)
             response.headers.update(r.headers)
             return response
         else:
-            # Full content stream
             def generate_stream():
                 with requests.get(telegram_file_url, stream=True) as r:
                     r.raise_for_status()
@@ -594,13 +593,27 @@ def cleanup_expired_links():
     if result.deleted_count > 0:
         print(f"✅ تم حذف {result.deleted_count} رابط منتهي الصلاحية.")
         log_activity(f"تم حذف {result.deleted_count} رابط منتهي الصلاحية.")
+        send_alert(f"🧹 تم بنجاح حذف {result.deleted_count} رابط منتهي الصلاحية.", file_url=None)
     else:
         print("ℹ️ لا توجد روابط منتهية الصلاحية ليتم حذفها.")
+
+# ======== وظيفة التحقق والتشغيل ========
+def check_and_run_cleanup():
+    if not mongo_client_active:
+        return
+        
+    settings = settings_collection.find_one({"_id": "global_settings"})
+    last_cleanup = settings.get("last_cleanup", datetime.now() - timedelta(hours=2))
+    
+    if datetime.now() - last_cleanup > timedelta(hours=1):
+        cleanup_expired_links()
+        update_setting("last_cleanup", datetime.now())
 
 # ======== Webhook ========
 @app.route("/", methods=["POST"])
 def webhook():
     if request.method == "POST":
+        check_and_run_cleanup()
         update = Update.de_json(request.get_json(force=True), bot)
         dispatcher.process_update(update)
     return "OK", 200
@@ -608,6 +621,7 @@ def webhook():
 # ======== اختبار Flask ========
 @app.route("/test", methods=["GET"])
 def test():
+    check_and_run_cleanup()
     return "Flask يعمل على Vercel ✅", 200
 
 # ======== اختبار الإشعارات ========
@@ -635,7 +649,7 @@ def show_stats(update, context):
     
     stats_text = (
         "📊 **إحصائيات البوت:**\n\n"
-        f"**الوضع العام:** {'مفعل ✅' if get_setting('public_mode') else 'متوقف 🔒'}\n"
+        f"**الوضع العام:** {'مفعل ✅' if get_setting("public_mode") else 'متوقف 🔒'}\n"
         f"**عدد المستخدمين المسجلين:** {total_users_count} مستخدم\n"
         f"**إجمالي عدد الأنشطة:** {total_activity_logs} نشاط\n"
         "*(ملاحظة: هذه الإحصائيات دائمة ومحفوظة في قاعدة البيانات)*"
@@ -652,10 +666,5 @@ dispatcher.add_handler(CommandHandler("stats", show_stats))
 
 # ======== تشغيل التطبيق ========
 if __name__ == "__main__":
-    scheduler = BackgroundScheduler()
-    # يتم تشغيل وظيفة التنظيف كل ساعة (يمكنك تغيير interval=60)
-    scheduler.add_job(cleanup_expired_links, 'interval', minutes=60)
-    scheduler.start()
-    
     port = int(os.getenv("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
