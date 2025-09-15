@@ -10,7 +10,7 @@ from io import BytesIO
 import requests
 from pymongo import MongoClient
 import urllib.parse
-from threading import Thread
+from apscheduler.schedulers.background import BackgroundScheduler
 import time
 
 # ======== إعداد Flask ========
@@ -583,6 +583,19 @@ def get_thumbnail(thumb_id):
     except Exception as e:
         return f"حدث خطأ: {e}", 400
 
+# ======== وظيفة الحذف التلقائي الجديدة ========
+def cleanup_expired_links():
+    if not mongo_client_active:
+        print("⚠️ تنظيف الروابط: لا يمكن الاتصال بقاعدة البيانات.")
+        return
+    
+    current_time = datetime.now()
+    result = links_collection.delete_many({"expire_time": {"$lt": current_time}})
+    if result.deleted_count > 0:
+        print(f"✅ تم حذف {result.deleted_count} رابط منتهي الصلاحية.")
+        log_activity(f"تم حذف {result.deleted_count} رابط منتهي الصلاحية.")
+    else:
+        print("ℹ️ لا توجد روابط منتهية الصلاحية ليتم حذفها.")
 
 # ======== Webhook ========
 @app.route("/", methods=["POST"])
@@ -639,5 +652,10 @@ dispatcher.add_handler(CommandHandler("stats", show_stats))
 
 # ======== تشغيل التطبيق ========
 if __name__ == "__main__":
+    scheduler = BackgroundScheduler()
+    # يتم تشغيل وظيفة التنظيف كل ساعة (يمكنك تغيير interval=60)
+    scheduler.add_job(cleanup_expired_links, 'interval', minutes=60)
+    scheduler.start()
+    
     port = int(os.getenv("PORT", 3000))
     app.run(host="0.0.0.0", port=port)
