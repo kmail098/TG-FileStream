@@ -10,6 +10,7 @@ from io import BytesIO
 import requests
 from pymongo import MongoClient
 import urllib.parse
+import ffmpeg # تم إضافة هذه المكتبة
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -128,6 +129,27 @@ def format_file_size(size_in_bytes):
     else:
         return f"{size_in_bytes / (1024 * 1024):.2f} ميجابايت"
 
+# ======== دالة جديدة لاستخراج بيانات الفيديو ========
+def get_video_metadata(file_path):
+    try:
+        probe = ffmpeg.probe(file_path)
+        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+        if video_stream:
+            width = video_stream.get('width', 'N/A')
+            height = video_stream.get('height', 'N/A')
+            duration_sec = float(video_stream.get('duration', 0))
+            duration_str = f"{int(duration_sec // 60)}د {int(duration_sec % 60)}ث"
+            bitrate = int(video_stream.get('bit_rate', 0)) // 1000
+            
+            return {
+                "resolution": f"{width}x{height}",
+                "duration": duration_str,
+                "bitrate": f"{bitrate} kbps"
+            }
+    except Exception as e:
+        print(f"فشل استخراج بيانات الفيديو: {e}")
+    return None
+
 # ======== /start مع لوحة المستخدم ========
 def start(update, context):
     user_id = update.message.from_user.id
@@ -175,6 +197,7 @@ def handle_file(update, context):
     file_size = 0
     file_name = "ملف غير معروف"
     thumb_id = None
+    metadata_text = ""
 
     try:
         if not users_collection.find_one({"user_id": user_id}):
@@ -195,13 +218,53 @@ def handle_file(update, context):
             file_type = "صورة"
             file_name = msg.photo[-1].file_unique_id + ".jpg"
         elif msg.video:
-            sent = bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
-            file_id = sent.video.file_id
-            file_size = msg.video.file_size
             file_type = "فيديو"
-            file_name = msg.video.file_name if msg.video.file_name else msg.video.file_unique_id + ".mp4"
-            if msg.video.thumb:
-                thumb_id = msg.video.thumb.file_id
+            # تنزيل الفيديو محليًا لمعالجته
+            video_file_tele = bot.get_file(msg.video.file_id)
+            downloaded_video_path = video_file_tele.download()
+
+            # استخراج البيانات أولاً
+            metadata = get_video_metadata(downloaded_video_path)
+            if metadata:
+                metadata_text = (
+                    f"\n**تفاصيل الفيديو:**\n"
+                    f"**الدقة:** {metadata['resolution']}\n"
+                    f"**المدة:** {metadata['duration']}\n"
+                    f"**معدل البت:** {metadata['bitrate']}"
+                )
+
+            # معالجة الفيديو وضغطه
+            output_video_path = "compressed_video.mp4"
+            try:
+                (
+                    ffmpeg
+                    .input(downloaded_video_path)
+                    .output(output_video_path, vcodec='libx264', crf=28)
+                    .run(overwrite_output=True)
+                )
+                with open(output_video_path, 'rb') as video_data:
+                    sent = bot.send_video(chat_id=BIN_CHANNEL, video=video_data)
+                    file_id = sent.video.file_id
+                    file_size = sent.video.file_size
+                    file_name = f"compressed_{msg.video.file_name}" if msg.video.file_name else f"compressed_{msg.video.file_unique_id}.mp4"
+                    if sent.video.thumb:
+                        thumb_id = sent.video.thumb.file_id
+            except ffmpeg.Error as e:
+                print(f"فشل معالجة الفيديو بـ FFmpeg: {e.stderr.decode()}")
+                # إذا فشلت المعالجة، استخدم الفيديو الأصلي
+                sent = bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
+                file_id = sent.video.file_id
+                file_size = msg.video.file_size
+                file_name = msg.video.file_name if msg.video.file_name else msg.video.file_unique_id + ".mp4"
+                if msg.video.thumb:
+                    thumb_id = msg.video.thumb.file_id
+
+            # حذف الملفات المحلية بعد الرفع
+            if os.path.exists(downloaded_video_path):
+                os.remove(downloaded_video_path)
+            if os.path.exists(output_video_path):
+                os.remove(output_video_path)
+        
         elif msg.audio:
             sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=msg.audio.file_id)
             file_id = sent.audio.file_id
@@ -242,7 +305,8 @@ def handle_file(update, context):
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        sent_msg = update.message.reply_photo(qr_image, caption=f"📎 الرابط صالح لمدة 24 ساعة", reply_markup=reply_markup)
+        caption_text = f"📎 الرابط صالح لمدة 24 ساعة{metadata_text}"
+        sent_msg = update.message.reply_photo(qr_image, caption=caption_text, reply_markup=reply_markup)
         
         log_activity(f"User {msg.from_user.id} رفع ملف {file_id}")
 
@@ -649,7 +713,7 @@ def show_stats(update, context):
     
     stats_text = (
         "📊 **إحصائيات البوت:**\n\n"
-        f"**الوضع العام:** {'مفعل ✅' if get_setting("public_mode") else 'متوقف 🔒'}\n"
+        f"**الوضع العام:** {'مفعل ✅' if get_setting('public_mode') else 'متوقف 🔒'}\n"
         f"**عدد المستخدمين المسجلين:** {total_users_count} مستخدم\n"
         f"**إجمالي عدد الأنشطة:** {total_activity_logs} نشاط\n"
         "*(ملاحظة: هذه الإحصائيات دائمة ومحفوظة في قاعدة البيانات)*"
