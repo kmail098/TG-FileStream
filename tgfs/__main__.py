@@ -204,7 +204,7 @@ def start(update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-# ======== رفع الملفات ========
+# ======== رفع الملفات (تم التحديث) ========
 def handle_file(update, context):
     user = update.message.from_user
     user_lang = get_user_lang(user.id, user.language_code)
@@ -214,6 +214,7 @@ def handle_file(update, context):
 
     msg = update.message
     file_id = None
+    file_unique_id = None
     file_size = 0
     file_name = "unknown_file"
     thumb_id = None
@@ -229,30 +230,34 @@ def handle_file(update, context):
         if msg.photo:
             sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=msg.photo[-1].file_id)
             file_id = sent.photo[-1].file_id
+            file_unique_id = sent.photo[-1].file_unique_id
             file_size = msg.photo[-1].file_size
             file_type = "image"
-            file_name = msg.photo[-1].file_unique_id + ".jpg"
+            file_name = sent.photo[-1].file_unique_id + ".jpg"
         elif msg.video:
             sent = bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
             file_id = sent.video.file_id
+            file_unique_id = sent.video.file_unique_id
             file_size = msg.video.file_size
             file_type = "video"
-            file_name = msg.video.file_name if msg.video.file_name else msg.video.file_unique_id + ".mp4"
+            file_name = msg.video.file_name if msg.video.file_name else sent.video.file_unique_id + ".mp4"
             if msg.video.thumb:
                 thumb_id = msg.video.thumb.file_id
         
         elif msg.audio:
             sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=msg.audio.file_id)
             file_id = sent.audio.file_id
+            file_unique_id = sent.audio.file_unique_id
             file_size = msg.audio.file_size
             file_type = "audio"
-            file_name = msg.audio.file_name if msg.audio.file_name else msg.audio.file_unique_id + ".mp3"
+            file_name = msg.audio.file_name if msg.audio.file_name else sent.audio.file_unique_id + ".mp3"
         elif msg.document:
             sent = bot.send_document(chat_id=BIN_CHANNEL, document=msg.document.file_id)
             file_id = sent.document.file_id
+            file_unique_id = sent.document.file_unique_id
             file_size = msg.document.file_size
             file_type = "document"
-            file_name = msg.document.file_name if msg.document.file_name else msg.document.file_unique_id + ".dat"
+            file_name = msg.document.file_name if msg.document.file_name else sent.document.file_unique_id + ".dat"
         else:
             update.message.reply_text(get_string(user_lang, 'unrecognized_file'))
             return
@@ -262,14 +267,15 @@ def handle_file(update, context):
         expire_time = datetime.now() + timedelta(hours=24)
         
         links_collection.insert_one({
-            "_id": file_id,
+            "_id": file_unique_id, # استخدام file_unique_id كمعرف أساسي
+            "file_id": file_id,
             "expire_time": expire_time,
             "file_name": file_name,
             "file_size": file_size,
             "thumb_id": thumb_id
         })
 
-        file_url = f"{PUBLIC_URL}/get_file/{file_id}"
+        file_url = f"{PUBLIC_URL}/get_file/{file_unique_id}"
         qr_image = generate_qr(file_url)
         
         caption_text = get_string(user_lang, 'link_caption')
@@ -282,7 +288,7 @@ def handle_file(update, context):
 
         sent_msg = update.message.reply_photo(qr_image, caption=caption_text, reply_markup=reply_markup)
         
-        log_activity(f"User {user.id} uploaded a file {file_id}")
+        log_activity(f"User {user.id} uploaded a file {file_unique_id}")
 
         alert_message = get_string('ar', 'upload_alert',
             user_name=user.first_name,
@@ -387,25 +393,25 @@ def handle_text(update, context):
 
     context.user_data['action'] = None
 
-# ======== مسار صفحة الملفات ========
-@app.route("/get_file/<file_id>", methods=["GET"])
-def get_file(file_id):
+# ======== مسار صفحة الملفات (تم التحديث) ========
+@app.route("/get_file/<file_unique_id>", methods=["GET"])
+def get_file(file_unique_id):
     try:
-        # إضافة جمل طباعة لتتبع الأخطاء
-        print(f"Received request for file ID: {file_id}")
+        print(f"Received request for file unique ID: {file_unique_id}")
         
-        link_doc = links_collection.find_one({"_id": file_id})
+        link_doc = links_collection.find_one({"_id": file_unique_id})
         
         if not link_doc:
-            print(f"File ID {file_id} not found in database.")
+            print(f"File unique ID {file_unique_id} not found in database.")
             return get_string('ar', 'link_invalid'), 400
 
         expire_time = link_doc["expire_time"]
         file_name = link_doc.get("file_name", "الملف")
+        file_id = link_doc["file_id"] # استرجاع file_id
         
         if datetime.now() > expire_time:
-            links_collection.delete_one({"_id": file_id})
-            print(f"Link for file ID {file_id} has expired.")
+            links_collection.delete_one({"_id": file_unique_id})
+            print(f"Link for file unique ID {file_unique_id} has expired.")
             return get_string('ar', 'link_expired'), 400
 
         file_info = bot.get_file(file_id)
@@ -492,14 +498,14 @@ def get_file(file_id):
         <h2>📽️ {{ file_name }}</h2>
         {% if file_type in ["video", "audio"] %}
         <video controls crossorigin playsinline>
-            <source src="/get_file/{{ file_id }}" type="{{ mime_type }}">
+            <source src="/get_file/{{ file_unique_id }}" type="{{ mime_type }}">
         </video>
         {% elif file_type == "image" %}
-        <img src="/get_file/{{ file_id }}" alt="Image">
+        <img src="/get_file/{{ file_unique_id }}" alt="Image">
         {% elif file_type == "document" %}
-        <iframe src="/get_file/{{ file_id }}" style="height: 500px;"></iframe>
+        <iframe src="/get_file/{{ file_unique_id }}" style="height: 500px;"></iframe>
         {% else %}
-        <p style="color:white;">File preview not supported. <a href="/get_file/{{ file_id }}" style="color:#00ffea;">Download here</a>.</p>
+        <p style="color:white;">File preview not supported. <a href="/get_file/{{ file_unique_id }}" style="color:#00ffea;">Download here</a>.</p>
         {% endif %}
     </div>
     <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
@@ -508,20 +514,21 @@ def get_file(file_id):
     </script>
 </body>
 </html>
-""", file_name=file_name, file_id=file_id, mime_type=mime_type, file_type=file_type)
+""", file_name=file_name, file_unique_id=file_unique_id, mime_type=mime_type, file_type=file_type)
 
     except Exception as e:
         print(f"An error occurred in get_file: {traceback.format_exc()}")
         return get_string('ar', 'upload_failed', error=e), 400
 
 # ======== مسار تشغيل الفيديو/التحميل (الخادم الوسيط) ========
-@app.route("/stream_file/<file_id>", methods=["GET"])
-def stream_file(file_id):
+@app.route("/stream_file/<file_unique_id>", methods=["GET"])
+def stream_file(file_unique_id):
     try:
-        link_doc = links_collection.find_one({"_id": file_id})
+        link_doc = links_collection.find_one({"_id": file_unique_id})
         if not link_doc or datetime.now() > link_doc["expire_time"]:
             return get_string('ar', 'link_invalid'), 400
             
+        file_id = link_doc["file_id"]
         file_info = bot.get_file(file_id)
         telegram_file_url = file_info.file_path
         
@@ -554,7 +561,7 @@ def stream_file(file_id):
         print(f"An error occurred in stream_file: {traceback.format_exc()}")
         return get_string('ar', 'upload_failed', error=e), 400
 
-# ======== مسار عرض الصورة المصغرة ========
+# ======== مسار عرض الصورة المصغرة (تم التحديث) ========
 @app.route("/get_thumbnail/<thumb_id>", methods=["GET"])
 def get_thumbnail(thumb_id):
     try:
