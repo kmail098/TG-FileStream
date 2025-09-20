@@ -7,4 +7,3 @@ six
 Pillow
 pymongo
 apscheduler
-ffmpeg-python
