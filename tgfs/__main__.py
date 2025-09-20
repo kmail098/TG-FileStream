@@ -438,10 +438,21 @@ def get_file(file_id):
                     margin: 0;
                     flex-direction: column;
                     padding: 20px;
+                }}
+                /* CSS جديد للخلفية */
+                body::before {{
+                    content: "";
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
                     background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/0/00/Flag_of_Palestine_%28ISO_3166-2%29.svg/1200px-Flag_of_Palestine_%28ISO_3166-2%29.svg.png');
                     background-size: cover;
                     background-position: center;
                     background-attachment: fixed;
+                    filter: brightness(0.6) blur(2px);
+                    z-index: -1;
                 }}
                 .container {{
                     max-width: 900px;
@@ -454,6 +465,8 @@ def get_file(file_id):
                     flex-direction: column;
                     align-items: center;
                     backdrop-filter: blur(5px);
+                    position: relative;
+                    z-index: 1;
                 }}
                 .info {{
                     margin-bottom: 20px;
