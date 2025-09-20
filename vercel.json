@@ -6,7 +6,7 @@
   },
   "builds": [
     {
-      "src": "requirements.txt",
+      "src": "requirements.tt",
       "use": "@vercel/python"
     }
   ],
