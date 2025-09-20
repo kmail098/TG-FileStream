@@ -23,7 +23,8 @@ PUBLIC_URL = os.getenv("PUBLIC_URL")
 ADMIN_ID = "7485195087"
 MONGO_URI = os.getenv("MONGO_URI")
 
-bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8))
+# استخدام `aiohttp` لدعم حجم الملفات الأكبر
+bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8, connection_pool_size=8))
 dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
 # ======== الاتصال بقاعدة البيانات ========
@@ -252,10 +253,10 @@ def handle_file(update, context):
             # رسالة جديدة للملفات غير المدعومة
             update.message.reply_text(get_string(user_lang, 'unrecognized_file'))
             return
-
-        if file_size > 100 * 1024 * 1024:
-            update.message.reply_text(get_string(user_lang, 'file_too_large'))
-
+        
+        # طباعة حجم الملف في السجلات للتحقق
+        print(f"File size is: {file_size} bytes")
+        
         expire_time = datetime.now() + timedelta(hours=24)
         
         links_collection.insert_one({
@@ -561,7 +562,7 @@ def get_file(file_id):
                     var hours = Math.floor((remaining / (1000 * 60 * 60)));
                     var minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
 
-                    var time_left_string = "{get_string('ar', 'time_left_button')}";
+                    var time_left_string = "{get_string('ar', 'time_left_button', time_left='{{time_left}}', minutes='{{minutes}}')}";
                     var final_string = time_left_string.replace("{{time_left}}", hours).replace("{{minutes}}", minutes);
                     countdown_el.innerHTML = final_string;
                 }}
