@@ -133,7 +133,10 @@ def log_activity(msg):
 def send_alert(message, file_url=None):
     if get_setting("notifications_enabled"):
         try:
-            bot.send_message(chat_id=BIN_CHANNEL, text=message, parse_mode=ParseMode.MARKDOWN)
+            full_message = message
+            if file_url:
+                full_message += f"\n\n🔗 رابط: {file_url}"
+            bot.send_message(chat_id=BIN_CHANNEL, text=full_message, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
             print(f"❌ فشل إرسال الإشعار إلى القناة. السبب: {e}")
 
@@ -290,7 +293,7 @@ def handle_file(update, context):
             timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             size=format_file_size(file_size)
         )
-        send_alert(alert_message, file_url)
+        send_alert(alert_message, file_url=file_url) # تم تصحيح هذا السطر
 
     except Exception as e:
         update.message.reply_text(get_string(user_lang, 'upload_failed', error=e))
