@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "tgfs/__main__.py": {
+      "runtime": "python3.9"
+    }
+  },
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "tgfs/__main__.py"
+    }
+  ]
+}
