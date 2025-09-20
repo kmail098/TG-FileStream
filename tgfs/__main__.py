@@ -249,6 +249,7 @@ def handle_file(update, context):
             file_type = "document"
             file_name = msg.document.file_name if msg.document.file_name else msg.document.file_unique_id + ".dat"
         else:
+            # رسالة جديدة للملفات غير المدعومة
             update.message.reply_text(get_string(user_lang, 'unrecognized_file'))
             return
 
@@ -630,7 +631,7 @@ def stream_file(file_id):
             return Response(generate_stream(), mimetype='video/mp4')
             
     except Exception as e:
-        print(f"An error occurred in stream_file: {traceback.format_exc()}") # هذا السطر الذي أضفناه
+        print(f"An error occurred in stream_file: {traceback.format_exc()}")
         return get_string('ar', 'upload_failed', error=e), 400
 
 
