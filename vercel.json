@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "vercel-build.sh",
+      "use": "@vercel/bash"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "tgfs/__main__.py"
+    }
+  ]
+}
