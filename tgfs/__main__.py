@@ -404,14 +404,13 @@ def get_file(file_id):
         
         is_video = file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogg', '.ogv']
         is_audio = file_extension in ['.mp3', '.ogg', '.wav', '.flac']
+        is_image = file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        is_document = file_extension in ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt']
         
-        if not is_video and not is_audio:
-            download_url = f"{PUBLIC_URL}/download_file/{file_id}"
-            return redirect(download_url)
-            
         stream_url = f"{PUBLIC_URL}/stream_file/{file_id}"
         thumbnail_url = f"{PUBLIC_URL}/get_thumbnail/{thumb_id}" if thumb_id else ""
         
+        # HTML Content
         html_content = f"""
         <html>
         <head>
@@ -498,6 +497,15 @@ def get_file(file_id):
                 .plyr--full-ui input[type=range] {{
                     color: #e50914 !important;
                 }}
+                .file-preview {{
+                    width: 100%;
+                    max-width: 800px;
+                    height: auto;
+                    max-height: 600px;
+                    border-radius: 8px;
+                    object-fit: contain;
+                    margin-bottom: 20px;
+                }}
             </style>
         </head>
         <body>
@@ -507,11 +515,16 @@ def get_file(file_id):
                     <p>الحجم: {format_file_size(file_size)}</p>
                     <p id="countdown" class="countdown-timer"></p>
                 </div>
-                <div class="player-container">
-                    {'<video id="player" playsinline controls poster="' + thumbnail_url + '">' if is_video else '<audio id="player" controls>'}
-                        <source src='{stream_url}' type='{"video/" if is_video else "audio/"}{file_extension.strip(".")}'></source>
-                    {'' if is_video else '</audio>'}
-                </div>
+                {'<div class="player-container">' if is_video or is_audio else ''}
+                {'' if is_image or is_document or (not is_video and not is_audio) else '<video id="player" playsinline controls poster="' + thumbnail_url + '">' if is_video else '<audio id="player" controls>'}
+                {'' if not (is_video or is_audio) else f'<source src="{stream_url}" type="{"video/" if is_video else "audio/"}{file_extension.strip(".")}"</source>'}
+                {'' if not (is_video or is_audio) else '</video>' if is_video else '</audio>'}
+                {'</div>' if is_video or is_audio else ''}
+
+                {f'<img src="{stream_url}" class="file-preview" alt="Image Preview">' if is_image else ''}
+                {f'<iframe src="https://docs.google.com/gview?url={urllib.parse.quote_plus(stream_url)}&embedded=true" class="file-preview" style="width:100%; height:500px;" frameborder="0"></iframe>' if is_document and file_extension in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'] else ''}
+                {f'<iframe src="{stream_url}" class="file-preview" style="width:100%; height:500px;" frameborder="0"></iframe>' if is_document and file_extension in ['.pdf', '.txt'] else ''}
+
                 <div class="button-group">
                     <a href="{stream_url}" class="btn">
                         <i class="fas fa-download"></i>
@@ -526,7 +539,10 @@ def get_file(file_id):
 
             <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
             <script>
-                const player = new Plyr('#player');
+                const player = document.getElementById("player");
+                if (player) {{
+                    const plyrPlayer = new Plyr('#player');
+                }}
                 var expire_time = new Date("{expire_time.isoformat()}Z");
                 var countdown_el = document.getElementById("countdown");
 
