@@ -1,8 +1,8 @@
 {
   "builds": [
     {
-      "src": "tgfs/__main__.py",
-      "use": "vercel-build-tools/heroku-buildpack-python"
+      "src": "Procfile",
+      "use": "@heroku/heroku-buildpack-multi"
     }
   ],
   "routes": [
