@@ -1,13 +1,9 @@
 {
-  "functions": {
-    "api/index.py": {
-      "runtime": "python3.9"
-    }
-  },
+  "version": 2,
   "builds": [
-    {
-      "src": "requirements.txt",
-      "use": "@vercel/python"
-    }
+    { "src": "tgfs/__main__.py", "use": "@vercel/python" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "tgfs/__main__.py" }
   ]
 }
