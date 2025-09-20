@@ -12,6 +12,7 @@ import requests
 from pymongo import MongoClient
 import urllib.parse
 import traceback
+import urllib3
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -23,8 +24,9 @@ PUBLIC_URL = os.getenv("PUBLIC_URL")
 ADMIN_ID = "7485195087"
 MONGO_URI = os.getenv("MONGO_URI")
 
-# استخدام `aiohttp` لدعم حجم الملفات الأكبر
-bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8, connection_pool_size=8))
+# استخدام urllib3 مباشرة لحل مشكلة التضارب في الإصدارات
+http = urllib3.PoolManager(num_pools=8)
+bot = Bot(token=BOT_TOKEN, request=Request(http_connection=http))
 dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
 # ======== الاتصال بقاعدة البيانات ========
@@ -59,7 +61,7 @@ def load_translations():
     for filename in os.listdir(LANG_DIR):
         if filename.endswith('.json'):
             lang_code = filename.split('.')[0]
-            with open(os.path.join(LANG_DIR, filename), 'r', encoding='utf-8') as f:
+            with open(os.path.join(LANG_DIR, 'ar.json'), 'r', encoding='utf-8') as f:
                 translations[lang_code] = json.load(f)
     return translations
 
@@ -79,7 +81,7 @@ def get_user_lang(user_id, tg_lang_code):
 def get_string(user_lang, key, **kwargs):
     lang_code = user_lang.split('-')[0]
     if lang_code not in TRANSLATIONS:
-        lang_code = 'en'  # اللغة الافتراضية
+        lang_code = 'ar'  # اللغة الافتراضية
     
     text = TRANSLATIONS[lang_code].get(key, key)
     return text.format(**kwargs)
@@ -584,16 +586,6 @@ def get_file(file_id):
         print(f"An error occurred in get_file: {traceback.format_exc()}")
         return get_string('ar', 'upload_failed', error=e), 400
 
-# ======== مسار تحميل الملف (الخادم الوسيط) ========
-# تم دمج هذه الوظيفة الآن في مسار stream_file لتكون أكثر كفاءة
-# تم إبقاؤها هنا كتعليق لتذكيرك
-# @app.route("/download_file/<file_id>", methods=["GET"])
-# def download_file(file_id):
-#     try:
-#         ...
-#     except Exception as e:
-#         ...
-#
 # ======== مسار تشغيل الفيديو/التحميل (الخادم الوسيط) ========
 @app.route("/stream_file/<file_id>", methods=["GET"])
 def stream_file(file_id):
