@@ -293,7 +293,7 @@ def handle_file(update, context):
             timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             size=format_file_size(file_size)
         )
-        send_alert(alert_message, file_url=file_url) # تم تصحيح هذا السطر
+        send_alert(alert_message, file_url=file_url)
 
     except Exception as e:
         update.message.reply_text(get_string(user_lang, 'upload_failed', error=e))
