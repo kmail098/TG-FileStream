@@ -1,13 +1,19 @@
 {
-  "functions": {
-    "tgfs/__main__.py": {
-      "runtime": "python3.9"
-    }
-  },
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "tgfs/__main__.py"
-    }
-  ]
+  "functions": {
+    "tgfs/__main__.py": {
+      "runtime": "python3.9"
+    }
+  },
+  "builds": [
+    {
+      "src": "tgfs/__main__.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "tgfs/__main__.py"
+    }
+  ]
 }
