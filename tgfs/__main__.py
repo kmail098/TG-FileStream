@@ -438,17 +438,22 @@ def get_file(file_id):
                     margin: 0;
                     flex-direction: column;
                     padding: 20px;
+                    background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/0/00/Flag_of_Palestine_%28ISO_3166-2%29.svg/1200px-Flag_of_Palestine_%28ISO_3166-2%29.svg.png');
+                    background-size: cover;
+                    background-position: center;
+                    background-attachment: fixed;
                 }}
                 .container {{
                     max-width: 900px;
                     width: 100%;
-                    background-color: #1a1a1a;
+                    background-color: rgba(26, 26, 26, 0.9);
                     border-radius: 12px;
                     padding: 20px;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
                     display: flex;
                     flex-direction: column;
                     align-items: center;
+                    backdrop-filter: blur(5px);
                 }}
                 .info {{
                     margin-bottom: 20px;
