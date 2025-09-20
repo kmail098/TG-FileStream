@@ -428,7 +428,10 @@ def get_file(file_id):
             <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
             <style>
                 body {{
-                    background-color: #0d0d0d;
+                    background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/0/00/Flag_of_Palestine_%28ISO_3166-2%29.svg/1200px-Flag_of_Palestine_%28ISO_3166-2%29.svg.png');
+                    background-size: cover;
+                    background-position: center;
+                    background-attachment: fixed;
                     color: #fff;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                     display: flex;
@@ -438,35 +441,30 @@ def get_file(file_id):
                     margin: 0;
                     flex-direction: column;
                     padding: 20px;
+                    position: relative;
                 }}
-                /* CSS جديد للخلفية */
                 body::before {{
                     content: "";
-                    position: fixed;
+                    position: absolute;
                     top: 0;
                     left: 0;
                     width: 100%;
                     height: 100%;
-                    background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/0/00/Flag_of_Palestine_%28ISO_3166-2%29.svg/1200px-Flag_of_Palestine_%28ISO_3166-2%29.svg.png');
-                    background-size: cover;
-                    background-position: center;
-                    background-attachment: fixed;
-                    filter: brightness(0.6) blur(2px);
-                    z-index: -1;
+                    background-color: rgba(0, 0, 0, 0.7); /* طبقة شفافة سوداء */
+                    backdrop-filter: blur(5px); /* تأثير ضبابي */
                 }}
                 .container {{
                     max-width: 900px;
                     width: 100%;
-                    background-color: rgba(26, 26, 26, 0.9);
+                    background-color: rgba(26, 26, 26, 0.8);
                     border-radius: 12px;
                     padding: 20px;
                     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
                     display: flex;
                     flex-direction: column;
                     align-items: center;
-                    backdrop-filter: blur(5px);
                     position: relative;
-                    z-index: 1;
+                    z-index: 1; /* لضمان ظهور المحتوى فوق الطبقة */
                 }}
                 .info {{
                     margin-bottom: 20px;
