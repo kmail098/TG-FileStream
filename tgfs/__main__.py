@@ -24,9 +24,8 @@ PUBLIC_URL = os.getenv("PUBLIC_URL")
 ADMIN_ID = "7485195087"
 MONGO_URI = os.getenv("MONGO_URI")
 
-# استخدام urllib3 مباشرة لحل مشكلة التضارب في الإصدارات
-http = urllib3.PoolManager(num_pools=8)
-bot = Bot(token=BOT_TOKEN, request=Request(http_connection=http))
+# تم إزالة المعاملات التي تسبب المشكلة
+bot = Bot(token=BOT_TOKEN)
 dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
 # ======== الاتصال بقاعدة البيانات ========
