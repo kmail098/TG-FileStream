@@ -391,16 +391,21 @@ def handle_text(update, context):
 @app.route("/get_file/<file_id>", methods=["GET"])
 def get_file(file_id):
     try:
+        # إضافة جمل طباعة لتتبع الأخطاء
+        print(f"Received request for file ID: {file_id}")
+        
         link_doc = links_collection.find_one({"_id": file_id})
+        
         if not link_doc:
+            print(f"File ID {file_id} not found in database.")
             return get_string('ar', 'link_invalid'), 400
 
         expire_time = link_doc["expire_time"]
         file_name = link_doc.get("file_name", "الملف")
-        file_size = link_doc.get("file_size", 0)
         
         if datetime.now() > expire_time:
             links_collection.delete_one({"_id": file_id})
+            print(f"Link for file ID {file_id} has expired.")
             return get_string('ar', 'link_expired'), 400
 
         file_info = bot.get_file(file_id)
