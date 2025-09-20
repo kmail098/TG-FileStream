@@ -246,24 +246,25 @@ def handle_file(update, context):
             send_alert(new_user_alert)
             log_activity(f"New user {user.id} registered")
 
-        # إرسال الملف إلى القناة للحصول على file_id الثابت
+        file_id_to_send = file_info.file_id
         if file_type == "image":
-            sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=file_info.file_id)
+            sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=file_id_to_send)
         elif file_type == "video":
-            sent = bot.send_video(chat_id=BIN_CHANNEL, video=file_info.file_id)
+            sent = bot.send_video(chat_id=BIN_CHANNEL, video=file_id_to_send)
         elif file_type == "audio":
-            sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=file_info.file_id)
+            sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=file_id_to_send)
         elif file_type == "document":
-            sent = bot.send_document(chat_id=BIN_CHANNEL, document=file_info.file_id)
-
-        # استخراج file_unique_id من الرسالة الأصلية
+            sent = bot.send_document(chat_id=BIN_CHANNEL, document=file_id_to_send)
+        
+        file_id_to_store = sent.effective_attachment.file_id if sent.effective_attachment else sent.file_id
+        
         file_unique_id = file_info.file_unique_id
 
         expire_time = datetime.now() + timedelta(hours=24)
         
         links_collection.insert_one({
             "_id": file_unique_id, 
-            "file_id": file_info.file_id,
+            "file_id": file_id_to_store,
             "expire_time": expire_time,
             "file_name": file_name,
             "file_size": file_info.file_size,
@@ -297,7 +298,6 @@ def handle_file(update, context):
     except Exception as e:
         print(f"❌ حدث خطأ في معالجة الملف: {traceback.format_exc()}")
         update.message.reply_text(get_string(user_lang, 'upload_failed', error=e))
-
 
 # ======== التعامل مع الأزرار ========
 def button_handler(update, context):
@@ -411,14 +411,24 @@ def get_file(file_unique_id):
             print(f"Link for file unique ID {file_unique_id} has expired.")
             return get_string('ar', 'link_expired'), 400
 
-        file_info = bot.get_file(file_id)
-        file_extension = os.path.splitext(file_info.file_path)[1].lower()
+        # تحديد file_type بناءً على امتداد الملف
+        file_extension = os.path.splitext(file_name)[1].lower()
         
         is_video = file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogv']
         is_audio = file_extension in ['.mp3', '.ogg', '.wav', '.flac']
         is_image = file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
         is_document = file_extension in ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt']
         
+        file_type = ""
+        if is_video:
+            file_type = "video"
+        elif is_audio:
+            file_type = "audio"
+        elif is_image:
+            file_type = "image"
+        elif is_document:
+            file_type = "document"
+
         mime_type = "video/mp4" if is_video else "audio/mpeg" if is_audio else "image/jpeg" if is_image else "application/octet-stream"
         
         return render_template_string("""
@@ -489,7 +499,6 @@ def get_file(file_unique_id):
     </style>
 </head>
 <body>
-    <!-- فيديو الخلفية -->
     <video autoplay muted loop id="bg-video">
         <source src="https://static.vecteezy.com/system/resources/previews/031/705/655/mp4/free-palestine-save-palestine-palestine-freedom-with-hand-black-background-free-video.mp4" type="video/mp4">
     </video>
@@ -499,17 +508,17 @@ def get_file(file_unique_id):
 
         {% if file_type in ["video", "audio"] %}
             <video id="player" controls crossorigin playsinline>
-                <source src="/get_file/{{ file_id }}" type="{{ mime_type }}">
+                <source src="/stream_file/{{ file_unique_id }}" type="{{ mime_type }}">
             </video>
         {% elif file_type == "image" %}
-            <img src="/get_file/{{ file_id }}" alt="Image">
+            <img src="/stream_file/{{ file_unique_id }}" alt="Image">
         {% elif file_type == "document" %}
-            <iframe src="/get_file/{{ file_id }}" style="height: 500px;"></iframe>
+            <iframe src="/stream_file/{{ file_unique_id }}" style="height: 500px;"></iframe>
         {% else %}
-            <p>معاينة الملف غير مدعومة. <a href="/get_file/{{ file_id }}" class="download-link">تحميل هنا</a></p>
+            <p>معاينة الملف غير مدعومة. <a href="/stream_file/{{ file_unique_id }}" class="download-link">تحميل هنا</a></p>
         {% endif %}
 
-        <a href="/get_file/{{ file_id }}" class="download-link">⬇️ تحميل الملف</a>
+        <a href="/stream_file/{{ file_unique_id }}?download=true" class="download-link">⬇️ تحميل الملف</a>
     </div>
 
     <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
@@ -520,8 +529,7 @@ def get_file(file_unique_id):
     </script>
 </body>
 </html>
-""", file_name=file_name, file_id=file_id, mime_type=mime_type, file_type=file_type)
-
+        """, file_name=file_name, file_unique_id=file_unique_id, mime_type=mime_type, file_type=file_type)
 
     except Exception as e:
         print(f"An error occurred in get_file: {traceback.format_exc()}")
