@@ -1,9 +1,13 @@
 {
-  "version": 2,
+  "functions": {
+    "tgfs/__main__.py": {
+      "runtime": "python3.9"
+    }
+  },
   "builds": [
     {
-      "src": "vercel-build.sh",
-      "use": "@vercel/bash"
+      "src": "requirements.txt",
+      "use": "@vercel/python"
     }
   ],
   "routes": [
