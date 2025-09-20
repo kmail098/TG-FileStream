@@ -1,8 +1,8 @@
 {
   "builds": [
     {
-      "src": "Procfile",
-      "use": "@heroku/heroku-buildpack-multi"
+      "src": "tgfs/__main__.py",
+      "use": "https://github.com/jonico/buildpack-python-ffmpeg-git"
     }
   ],
   "routes": [
