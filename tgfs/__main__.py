@@ -10,7 +10,7 @@ from io import BytesIO
 import requests
 from pymongo import MongoClient
 import urllib.parse
-import ffmpeg # تم إضافة هذه المكتبة
+#import ffmpeg # تم إضافة هذه المكتبة
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
