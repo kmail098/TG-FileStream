@@ -24,7 +24,7 @@ ADMIN_ID = "7485195087"
 MONGO_URI = os.getenv("MONGO_URI")
 
 # استخدام `aiohttp` لدعم حجم الملفات الأكبر
-bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8, pool_size=8))
+bot = Bot(token=BOT_TOKEN, request=Request(con_pool_size=8, connection_pool_size=8))
 dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
 # ======== الاتصال بقاعدة البيانات ========
