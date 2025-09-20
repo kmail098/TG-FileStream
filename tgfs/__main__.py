@@ -62,11 +62,22 @@ def load_translations():
     return translations
 
 TRANSLATIONS = load_translations()
+SUPPORTED_LANGUAGES = {'ar': 'العربية', 'en': 'English'}
+
+def get_user_lang(user_id, tg_lang_code):
+    if not mongo_client_active:
+        return tg_lang_code
+        
+    user_doc = users_collection.find_one({"user_id": user_id})
+    if user_doc and 'preferred_lang' in user_doc:
+        return user_doc['preferred_lang']
+    
+    return tg_lang_code
 
 def get_string(user_lang, key, **kwargs):
     lang_code = user_lang.split('-')[0]
     if lang_code not in TRANSLATIONS:
-        lang_code = 'ar'  # اللغة الافتراضية
+        lang_code = 'en'  # اللغة الافتراضية
     
     text = TRANSLATIONS[lang_code].get(key, key)
     return text.format(**kwargs)
@@ -152,7 +163,7 @@ def format_file_size(size_in_bytes):
 # ======== /start مع لوحة المستخدم ========
 def start(update, context):
     user = update.message.from_user
-    user_lang = user.language_code
+    user_lang = get_user_lang(user.id, user.language_code)
     
     if not is_allowed_user(user.id):
         update.message.reply_text(get_string(user_lang, 'no_permission'))
@@ -176,19 +187,21 @@ def start(update, context):
              InlineKeyboardButton(get_string(user_lang, 'remove_user_button'), callback_data="remove_user")],
             [InlineKeyboardButton(get_string(user_lang, 'list_users_button'), callback_data="list_users"),
              InlineKeyboardButton(get_string(user_lang, 'activity_log_button'), callback_data="activity_log")],
-            [InlineKeyboardButton(get_string(user_lang, 'notifications_on') if not notifications_enabled else get_string(user_lang, 'notifications_off'), callback_data="notifications_toggle")]
+            [InlineKeyboardButton(get_string(user_lang, 'notifications_on') if not notifications_enabled else get_string(user_lang, 'notifications_off'), callback_data="notifications_toggle")],
+            [InlineKeyboardButton(get_string(user_lang, 'language_button'), callback_data="select_language")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
-        keyboard = [[InlineKeyboardButton(get_string(user_lang, 'upload_file_button'), callback_data="upload_file")]]
+        keyboard = [[InlineKeyboardButton(get_string(user_lang, 'upload_file_button'), callback_data="upload_file")],
+                    [InlineKeyboardButton(get_string(user_lang, 'language_button'), callback_data="select_language")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 # ======== رفع الملفات ========
 def handle_file(update, context):
     user = update.message.from_user
-    user_lang = user.language_code
+    user_lang = get_user_lang(user.id, user.language_code)
     if not is_allowed_user(user.id):
         update.message.reply_text(get_string(user_lang, 'no_permission'))
         return
@@ -283,9 +296,26 @@ def button_handler(update, context):
     query = update.callback_query
     query.answer()
     
-    user_lang = query.from_user.language_code
+    user_id = query.from_user.id
+    user_lang = get_user_lang(user_id, query.from_user.language_code)
 
-    if str(query.from_user.id) != ADMIN_ID:
+    if query.data == "select_language":
+        keyboard = [[InlineKeyboardButton(name, callback_data=f"set_lang_{code}")] for code, name in SUPPORTED_LANGUAGES.items()]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(get_string(user_lang, 'choose_language_message'), reply_markup=reply_markup)
+        return
+    
+    if query.data.startswith("set_lang_"):
+        new_lang_code = query.data.split("_")[2]
+        if mongo_client_active:
+            users_collection.update_one({"user_id": user_id}, {"$set": {"preferred_lang": new_lang_code}}, upsert=True)
+            new_lang_name = SUPPORTED_LANGUAGES.get(new_lang_code, 'Unknown')
+            query.edit_message_text(f"✅ تم تغيير لغة البوت إلى {new_lang_name}.")
+        else:
+            query.edit_message_text(get_string(user_lang, 'no_db_access'))
+        return
+
+    if str(user_id) != ADMIN_ID:
         return
 
     if query.data == "public_toggle":
@@ -323,7 +353,7 @@ def button_handler(update, context):
 # ======== التعامل مع إدخال المعرف ========
 def handle_text(update, context):
     user = update.message.from_user
-    user_lang = user.language_code
+    user_lang = get_user_lang(user.id, user.language_code)
     if str(user.id) != ADMIN_ID:
         return
 
@@ -660,7 +690,7 @@ def test_alert():
 # ======== ميزة الإحصائيات الجديدة ========
 def show_stats(update, context):
     user = update.message.from_user
-    user_lang = user.language_code
+    user_lang = get_user_lang(user.id, user.language_code)
     if str(user.id) != ADMIN_ID:
         update.message.reply_text(get_string(user_lang, 'stats_no_permission'))
         return
