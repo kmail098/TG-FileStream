@@ -11,6 +11,7 @@ from io import BytesIO
 import requests
 from pymongo import MongoClient
 import urllib.parse
+import traceback
 
 # ======== إعداد Flask ========
 app = Flask(__name__)
@@ -526,7 +527,7 @@ def get_file(file_id):
                 {f'<iframe src="{stream_url}" class="file-preview" style="width:100%; height:500px;" frameborder="0"></iframe>' if is_document and file_extension in ['.pdf', '.txt'] else ''}
 
                 <div class="button-group">
-                    <a href="{stream_url}" class="btn">
+                    <a href="{stream_url}?download=true" class="btn">
                         <i class="fas fa-download"></i>
                         {get_string('ar', 'download_file')}
                     </a>
@@ -577,31 +578,20 @@ def get_file(file_id):
         return html_content, 200
 
     except Exception as e:
+        print(f"An error occurred in get_file: {traceback.format_exc()}")
         return get_string('ar', 'upload_failed', error=e), 400
 
-# ======== مسار تحميل الملف (للملفات غير الفيديو) ========
-@app.route("/download_file/<file_id>", methods=["GET"])
-def download_file(file_id):
-    try:
-        link_doc = links_collection.find_one({"_id": file_id})
-        if not link_doc:
-            return get_string('ar', 'link_invalid'), 400
-
-        expire_time = link_doc["expire_time"]
-        file_name = link_doc.get("file_name", "الملف")
-        if datetime.now() > expire_time:
-            links_collection.delete_one({"_id": file_id})
-            return get_string('ar', 'link_expired'), 400
-        
-        file_info = bot.get_file(file_id)
-        telegram_file_url = file_info.file_path
-        
-        response = requests.get(telegram_file_url)
-        return send_file(BytesIO(response.content), as_attachment=True, download_name=file_name)
-    except Exception as e:
-        return get_string('ar', 'upload_failed', error=e), 400
-
-# ======== مسار تشغيل الفيديو (الخادم الوسيط) ========
+# ======== مسار تحميل الملف (الخادم الوسيط) ========
+# تم دمج هذه الوظيفة الآن في مسار stream_file لتكون أكثر كفاءة
+# تم إبقاؤها هنا كتعليق لتذكيرك
+# @app.route("/download_file/<file_id>", methods=["GET"])
+# def download_file(file_id):
+#     try:
+#         ...
+#     except Exception as e:
+#         ...
+#
+# ======== مسار تشغيل الفيديو/التحميل (الخادم الوسيط) ========
 @app.route("/stream_file/<file_id>", methods=["GET"])
 def stream_file(file_id):
     try:
@@ -612,18 +602,22 @@ def stream_file(file_id):
         file_info = bot.get_file(file_id)
         telegram_file_url = file_info.file_path
         
+        is_download_request = request.args.get('download', 'false').lower() == 'true'
+        file_name = link_doc.get("file_name", "file")
+        
+        if is_download_request:
+            # Forcing the browser to download the file instead of streaming it
+            headers = {
+                'Content-Disposition': f'attachment; filename="{file_name}"',
+                'Content-Type': 'application/octet-stream'
+            }
+            r = requests.get(telegram_file_url, stream=True)
+            return Response(r.iter_content(chunk_size=8192), headers=headers, status=r.status_code)
+
         range_header = request.headers.get('Range', None)
         if range_header:
-            start, end = 0, None
-            m = re.search(r'bytes=(\d+)-(\d*)', range_header)
-            if m:
-                start = int(m.group(1))
-                if m.group(2):
-                    end = int(m.group(2))
-            
-            headers = {"Range": range_header}
-            r = requests.get(telegram_file_url, headers=headers, stream=True)
-            
+            # Handle streaming for video and audio
+            r = requests.get(telegram_file_url, headers={"Range": range_header}, stream=True)
             response = Response(r.iter_content(chunk_size=8192), status=r.status_code)
             response.headers.update(r.headers)
             return response
@@ -634,8 +628,11 @@ def stream_file(file_id):
                     for chunk in r.iter_content(chunk_size=8192):
                         yield chunk
             return Response(generate_stream(), mimetype='video/mp4')
+            
     except Exception as e:
+        print(f"An error occurred in stream_file: {traceback.format_exc()}") # هذا السطر الذي أضفناه
         return get_string('ar', 'upload_failed', error=e), 400
+
 
 # ======== مسار عرض الصورة المصغرة ========
 @app.route("/get_thumbnail/<thumb_id>", methods=["GET"])
