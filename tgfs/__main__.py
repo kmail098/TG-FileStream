@@ -358,14 +358,16 @@ def get_file(file_id):
         file_extension = os.path.splitext(file_info.file_path)[1].lower()
         
         is_video = file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogg', '.ogv']
+        is_audio = file_extension in ['.mp3', '.ogg', '.wav', '.flac']
         
-        if not is_video:
+        if not is_video and not is_audio:
             download_url = f"{PUBLIC_URL}/download_file/{file_id}"
             return redirect(download_url)
             
-        stream_url = f"{PUBLIC_URL}/stream_video/{file_id}"
+        stream_url = f"{PUBLIC_URL}/stream_file/{file_id}"
         thumbnail_url = f"{PUBLIC_URL}/get_thumbnail/{thumb_id}" if thumb_id else ""
         
+        # قالب HTML موحد للفيديو والصوت
         html_content = f"""
         <html>
         <head>
@@ -418,8 +420,9 @@ def get_file(file_id):
                     font-weight: bold;
                     margin-top: 10px;
                 }}
-                .video-player {{
+                .player-container {{
                     width: 100%;
+                    max-width: 800px; /* لضبط عرض مشغل الصوت */
                     height: auto;
                     border-radius: 8px;
                     background-color: #000;
@@ -460,13 +463,15 @@ def get_file(file_id):
                     <p>الحجم: {format_file_size(file_size)}</p>
                     <p id="countdown" class="countdown-timer"></p>
                 </div>
-                <video id='player' playsinline controls class='video-player' poster='{thumbnail_url}'>
-                    <source src='{stream_url}' type='video/{file_extension.strip(".")}'></source>
-                </video>
+                <div class="player-container">
+                    {'<video id="player" playsinline controls poster="' + thumbnail_url + '">' if is_video else '<audio id="player" controls>'}
+                        <source src='{stream_url}' type='{"video/" if is_video else "audio/"}{file_extension.strip(".")}'></source>
+                    {'' if is_video else '</audio>'}
+                </div>
                 <div class="button-group">
                     <a href="{stream_url}" class="btn">
                         <i class="fas fa-download"></i>
-                        تحميل الفيديو
+                        تحميل
                     </a>
                     <button class="btn" onclick="copyLink()">
                         <i class="fas fa-share-alt"></i>
@@ -537,8 +542,8 @@ def download_file(file_id):
         return f"حدث خطأ: {e}", 400
 
 # ======== مسار تشغيل الفيديو (الخادم الوسيط) ========
-@app.route("/stream_video/<file_id>", methods=["GET"])
-def stream_video(file_id):
+@app.route("/stream_file/<file_id>", methods=["GET"])
+def stream_file(file_id):
     try:
         link_doc = links_collection.find_one({"_id": file_id})
         if not link_doc or datetime.now() > link_doc["expire_time"]:
