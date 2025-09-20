@@ -423,92 +423,105 @@ def get_file(file_unique_id):
         
         return render_template_string("""
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ file_name }}</title>
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
     <style>
-        body {
+        /* ✅ خلفية فيديو متحرك */
+        body, html {
             margin: 0;
             padding: 0;
-            height: 100vh;
+            height: 100%;
             width: 100%;
+            font-family: 'Arial', sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
-            background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/0/00/Flag_of_Palestine_%28ISO_3166-2%29.svg/1200px-Flag_of_Palestine_%28ISO_3166-2%29.svg.png');
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-            animation: fadein 2s ease-in-out;
-            position: relative;
+            background: #000;
+            overflow: hidden;
         }
-        
-        body::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.65);
-            backdrop-filter: blur(5px);
+        #bg-video {
+            position: fixed;
+            right: 0;
+            bottom: 0;
+            min-width: 100%;
+            min-height: 100%;
             z-index: -1;
+            object-fit: cover;
+            filter: brightness(0.5);
         }
-
-        @keyframes fadein {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
         .player-container {
             width: 90%;
             max-width: 900px;
-            background: rgba(0,0,0,0.65);
+            background: rgba(0,0,0,0.6);
             border-radius: 20px;
             padding: 20px;
             box-shadow: 0 0 30px rgba(0,0,0,0.7);
-            z-index: 1;
+            text-align: center;
+            color: #fff;
         }
-
+        h2 {
+            margin-bottom: 15px;
+            text-shadow: 2px 2px 8px rgba(0,0,0,0.7);
+        }
         video, audio, iframe, img {
             width: 100%;
             border-radius: 15px;
-        }
-
-        h2 {
-            text-align: center;
-            font-family: 'Arial', sans-serif;
-            color: #fff;
             margin-bottom: 15px;
-            text-shadow: 2px 2px 8px #000;
+        }
+        a.download-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #ff4c4c;
+            color: #fff;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        a.download-link:hover {
+            background: #ff1c1c;
         }
     </style>
 </head>
 <body>
+    <!-- فيديو الخلفية -->
+    <video autoplay muted loop id="bg-video">
+        <source src="https://static.vecteezy.com/system/resources/previews/031/705/655/mp4/free-palestine-save-palestine-palestine-freedom-with-hand-black-background-free-video.mp4" type="video/mp4">
+    </video>
+
     <div class="player-container">
         <h2>📽️ {{ file_name }}</h2>
+
         {% if file_type in ["video", "audio"] %}
-        <video controls crossorigin playsinline>
-            <source src="/stream_file/{{ file_unique_id }}" type="{{ mime_type }}">
-        </video>
+            <video id="player" controls crossorigin playsinline>
+                <source src="/get_file/{{ file_id }}" type="{{ mime_type }}">
+            </video>
         {% elif file_type == "image" %}
-        <img src="/stream_file/{{ file_unique_id }}" alt="Image">
+            <img src="/get_file/{{ file_id }}" alt="Image">
         {% elif file_type == "document" %}
-        <iframe src="/stream_file/{{ file_unique_id }}" style="height: 500px;"></iframe>
+            <iframe src="/get_file/{{ file_id }}" style="height: 500px;"></iframe>
         {% else %}
-        <p style="color:white;">File preview not supported. <a href="/stream_file/{{ file_unique_id }}" style="color:#00ffea;">Download here</a>.</p>
+            <p>معاينة الملف غير مدعومة. <a href="/get_file/{{ file_id }}" class="download-link">تحميل هنا</a></p>
         {% endif %}
+
+        <a href="/get_file/{{ file_id }}" class="download-link">⬇️ تحميل الملف</a>
     </div>
+
     <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
     <script>
-        const player = new Plyr('video, audio', { controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen'] });
+        const player = new Plyr('#player', {
+            controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen', 'speed']
+        });
     </script>
 </body>
 </html>
-""", file_name=file_name, file_unique_id=file_unique_id, mime_type=mime_type, file_type=file_type)
+""", file_name=file_name, file_id=file_id, mime_type=mime_type, file_type=file_type)
+
 
     except Exception as e:
         print(f"An error occurred in get_file: {traceback.format_exc()}")
