@@ -212,11 +212,33 @@ def handle_file(update, context):
         return
 
     msg = update.message
-    file_unique_id = None
-    file_size = 0
+    file_info = None
+    file_type = ""
     file_name = "unknown_file"
     thumb_id = None
     
+    if msg.photo:
+        file_info = msg.photo[-1]
+        file_type = "image"
+        file_name = f"{file_info.file_unique_id}.jpg"
+    elif msg.video:
+        file_info = msg.video
+        file_type = "video"
+        file_name = file_info.file_name if file_info.file_name else f"{file_info.file_unique_id}.mp4"
+        if file_info.thumb:
+            thumb_id = file_info.thumb.file_id
+    elif msg.audio:
+        file_info = msg.audio
+        file_type = "audio"
+        file_name = file_info.file_name if file_info.file_name else f"{file_info.file_unique_id}.mp3"
+    elif msg.document:
+        file_info = msg.document
+        file_type = "document"
+        file_name = file_info.file_name if file_info.file_name else f"{file_info.file_unique_id}.dat"
+    else:
+        update.message.reply_text(get_string(user_lang, 'unrecognized_file'))
+        return
+
     try:
         if not users_collection.find_one({"user_id": user.id}):
             add_user(user.id)
@@ -224,48 +246,27 @@ def handle_file(update, context):
             send_alert(new_user_alert)
             log_activity(f"New user {user.id} registered")
 
-        file_type = ""
-        if msg.photo:
-            file_info = msg.photo[-1]
-            file_unique_id = file_info.file_unique_id
-            file_size = file_info.file_size
-            file_type = "image"
-            file_name = file_info.file_unique_id + ".jpg"
-        elif msg.video:
-            file_info = msg.video
-            file_unique_id = file_info.file_unique_id
-            file_size = file_info.file_size
-            file_type = "video"
-            file_name = file_info.file_name if file_info.file_name else file_info.file_unique_id + ".mp4"
-            if file_info.thumb:
-                thumb_id = file_info.thumb.file_id
-        
-        elif msg.audio:
-            file_info = msg.audio
-            file_unique_id = file_info.file_unique_id
-            file_size = file_info.file_size
-            file_type = "audio"
-            file_name = file_info.file_name if file_info.file_name else file_info.file_unique_id + ".mp3"
-        elif msg.document:
-            file_info = msg.document
-            file_unique_id = file_info.file_unique_id
-            file_size = file_info.file_size
-            file_type = "document"
-            file_name = file_info.file_name if file_info.file_name else file_info.file_unique_id + ".dat"
-        else:
-            update.message.reply_text(get_string(user_lang, 'unrecognized_file'))
-            return
-        
-        sent = bot.send_document(chat_id=BIN_CHANNEL, document=file_info.file_id)
-        
+        # إرسال الملف إلى القناة للحصول على file_id الثابت
+        if file_type == "image":
+            sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=file_info.file_id)
+        elif file_type == "video":
+            sent = bot.send_video(chat_id=BIN_CHANNEL, video=file_info.file_id)
+        elif file_type == "audio":
+            sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=file_info.file_id)
+        elif file_type == "document":
+            sent = bot.send_document(chat_id=BIN_CHANNEL, document=file_info.file_id)
+
+        # استخراج file_unique_id من الرسالة الأصلية
+        file_unique_id = file_info.file_unique_id
+
         expire_time = datetime.now() + timedelta(hours=24)
         
         links_collection.insert_one({
             "_id": file_unique_id, 
-            "file_id": sent.document.file_id,  # استخدام file_id الجديد
+            "file_id": file_info.file_id,
             "expire_time": expire_time,
             "file_name": file_name,
-            "file_size": file_size,
+            "file_size": file_info.file_size,
             "thumb_id": thumb_id
         })
 
@@ -289,12 +290,14 @@ def handle_file(update, context):
             user_id=user.id,
             file_type=file_type,
             timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            size=format_file_size(file_size)
+            size=format_file_size(file_info.file_size)
         )
         send_alert(alert_message, file_url=file_url)
 
     except Exception as e:
+        print(f"❌ حدث خطأ في معالجة الملف: {traceback.format_exc()}")
         update.message.reply_text(get_string(user_lang, 'upload_failed', error=e))
+
 
 # ======== التعامل مع الأزرار ========
 def button_handler(update, context):
