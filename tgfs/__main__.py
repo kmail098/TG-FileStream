@@ -1,7 +1,7 @@
-    import os
+import os
 import re
 import json
-from flask import Flask, request, send_file, Response, redirect
+from flask import Flask, request, send_file, Response, redirect, render_template_string
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
 from telegram.ext import Dispatcher, MessageHandler, Filters, CallbackQueryHandler, CommandHandler
 from telegram.utils.request import Request
@@ -24,7 +24,6 @@ PUBLIC_URL = os.getenv("PUBLIC_URL")
 ADMIN_ID = "7485195087"
 MONGO_URI = os.getenv("MONGO_URI")
 
-# تم إزالة المعاملات التي تسبب المشكلة
 bot = Bot(token=BOT_TOKEN)
 dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
@@ -204,7 +203,7 @@ def start(update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-# ======== رفع الملفات ========
+# ======== رفع الملفات (تم التحديث) ========
 def handle_file(update, context):
     user = update.message.from_user
     user_lang = get_user_lang(user.id, user.language_code)
@@ -213,7 +212,7 @@ def handle_file(update, context):
         return
 
     msg = update.message
-    file_id = None
+    file_unique_id = None
     file_size = 0
     file_name = "unknown_file"
     thumb_id = None
@@ -227,51 +226,50 @@ def handle_file(update, context):
 
         file_type = ""
         if msg.photo:
-            sent = bot.send_photo(chat_id=BIN_CHANNEL, photo=msg.photo[-1].file_id)
-            file_id = sent.photo[-1].file_id
-            file_size = msg.photo[-1].file_size
+            file_info = msg.photo[-1]
+            file_unique_id = file_info.file_unique_id
+            file_size = file_info.file_size
             file_type = "image"
-            file_name = msg.photo[-1].file_unique_id + ".jpg"
+            file_name = file_info.file_unique_id + ".jpg"
         elif msg.video:
-            sent = bot.send_video(chat_id=BIN_CHANNEL, video=msg.video.file_id)
-            file_id = sent.video.file_id
-            file_size = msg.video.file_size
+            file_info = msg.video
+            file_unique_id = file_info.file_unique_id
+            file_size = file_info.file_size
             file_type = "video"
-            file_name = msg.video.file_name if msg.video.file_name else msg.video.file_unique_id + ".mp4"
-            if msg.video.thumb:
-                thumb_id = msg.video.thumb.file_id
+            file_name = file_info.file_name if file_info.file_name else file_info.file_unique_id + ".mp4"
+            if file_info.thumb:
+                thumb_id = file_info.thumb.file_id
         
         elif msg.audio:
-            sent = bot.send_audio(chat_id=BIN_CHANNEL, audio=msg.audio.file_id)
-            file_id = sent.audio.file_id
-            file_size = msg.audio.file_size
+            file_info = msg.audio
+            file_unique_id = file_info.file_unique_id
+            file_size = file_info.file_size
             file_type = "audio"
-            file_name = msg.audio.file_name if msg.audio.file_name else msg.audio.file_unique_id + ".mp3"
+            file_name = file_info.file_name if file_info.file_name else file_info.file_unique_id + ".mp3"
         elif msg.document:
-            sent = bot.send_document(chat_id=BIN_CHANNEL, document=msg.document.file_id)
-            file_id = sent.document.file_id
-            file_size = msg.document.file_size
+            file_info = msg.document
+            file_unique_id = file_info.file_unique_id
+            file_size = file_info.file_size
             file_type = "document"
-            file_name = msg.document.file_name if msg.document.file_name else msg.document.file_unique_id + ".dat"
+            file_name = file_info.file_name if file_info.file_name else file_info.file_unique_id + ".dat"
         else:
-            # رسالة جديدة للملفات غير المدعومة
             update.message.reply_text(get_string(user_lang, 'unrecognized_file'))
             return
         
-        # طباعة حجم الملف في السجلات للتحقق
-        print(f"File size is: {file_size} bytes")
+        sent = bot.send_document(chat_id=BIN_CHANNEL, document=file_info.file_id)
         
         expire_time = datetime.now() + timedelta(hours=24)
         
         links_collection.insert_one({
-            "_id": file_id,
+            "_id": file_unique_id, 
+            "file_id": sent.document.file_id,  # استخدام file_id الجديد
             "expire_time": expire_time,
             "file_name": file_name,
             "file_size": file_size,
             "thumb_id": thumb_id
         })
 
-        file_url = f"{PUBLIC_URL}/get_file/{file_id}"
+        file_url = f"{PUBLIC_URL}/get_file/{file_unique_id}"
         qr_image = generate_qr(file_url)
         
         caption_text = get_string(user_lang, 'link_caption')
@@ -282,9 +280,9 @@ def handle_file(update, context):
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        sent_msg = update.message.reply_photo(qr_image, caption=caption_text, reply_markup=reply_markup)
+        update.message.reply_photo(qr_image, caption=caption_text, reply_markup=reply_markup)
         
-        log_activity(f"User {user.id} uploaded a file {file_id}")
+        log_activity(f"User {user.id} uploaded a file {file_unique_id}")
 
         alert_message = get_string('ar', 'upload_alert',
             user_name=user.first_name,
@@ -293,7 +291,7 @@ def handle_file(update, context):
             timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             size=format_file_size(file_size)
         )
-        send_alert(alert_message, file_url=file_url) # تم تصحيح هذا السطر
+        send_alert(alert_message, file_url=file_url)
 
     except Exception as e:
         update.message.reply_text(get_string(user_lang, 'upload_failed', error=e))
@@ -390,212 +388,141 @@ def handle_text(update, context):
     context.user_data['action'] = None
 
 # ======== مسار صفحة الملفات ========
-@app.route("/get_file/<file_id>", methods=["GET"])
-def get_file(file_id):
+@app.route("/get_file/<file_unique_id>", methods=["GET"])
+def get_file(file_unique_id):
     try:
-        link_doc = links_collection.find_one({"_id": file_id})
+        print(f"Received request for file unique ID: {file_unique_id}")
+        
+        link_doc = links_collection.find_one({"_id": file_unique_id})
+        
         if not link_doc:
+            print(f"File unique ID {file_unique_id} not found in database.")
             return get_string('ar', 'link_invalid'), 400
 
         expire_time = link_doc["expire_time"]
         file_name = link_doc.get("file_name", "الملف")
-        file_size = link_doc.get("file_size", 0)
-        thumb_id = link_doc.get("thumb_id")
-
+        file_id = link_doc["file_id"]
+        
         if datetime.now() > expire_time:
-            links_collection.delete_one({"_id": file_id})
+            links_collection.delete_one({"_id": file_unique_id})
+            print(f"Link for file unique ID {file_unique_id} has expired.")
             return get_string('ar', 'link_expired'), 400
 
         file_info = bot.get_file(file_id)
         file_extension = os.path.splitext(file_info.file_path)[1].lower()
         
-        is_video = file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogg', '.ogv']
+        is_video = file_extension in ['.mp4', '.mkv', '.mov', '.webm', '.ogv']
         is_audio = file_extension in ['.mp3', '.ogg', '.wav', '.flac']
         is_image = file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.webp']
         is_document = file_extension in ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt']
         
-        stream_url = f"{PUBLIC_URL}/stream_file/{file_id}"
-        thumbnail_url = f"{PUBLIC_URL}/get_thumbnail/{thumb_id}" if thumb_id else ""
+        mime_type = "video/mp4" if is_video else "audio/mpeg" if is_audio else "image/jpeg" if is_image else "application/octet-stream"
         
-        # HTML Content
-        html_content = f"""
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{file_name}</title>
-            <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-            <style>
-                body {{
-                    background-color: #0d0d0d;
-                    color: #fff;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    height: 100vh;
-                    margin: 0;
-                    flex-direction: column;
-                    padding: 20px;
-                }}
-                .container {{
-                    max-width: 900px;
-                    width: 100%;
-                    background-color: #1a1a1a;
-                    border-radius: 12px;
-                    padding: 20px;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                }}
-                .info {{
-                    margin-bottom: 20px;
-                    text-align: center;
-                }}
-                .info h1 {{
-                    font-size: 1.8em;
-                    margin: 0;
-                    color: #fff;
-                }}
-                .info p {{
-                    font-size: 0.9em;
-                    color: #ccc;
-                    margin: 5px 0 0;
-                }}
-                .countdown-timer {{
-                    font-size: 1.2em;
-                    color: #4CAF50;
-                    font-weight: bold;
-                    margin-top: 10px;
-                }}
-                .player-container {{
-                    width: 100%;
-                    max-width: 800px;
-                    height: auto;
-                    border-radius: 8px;
-                    background-color: #000;
-                }}
-                .button-group {{
-                    display: flex;
-                    justify-content: center;
-                    gap: 15px;
-                    margin-top: 20px;
-                }}
-                .btn {{
-                    display: flex;
-                    align-items: center;
-                    gap: 5px;
-                    padding: 12px 24px;
-                    background-color: #383838;
-                    color: #fff;
-                    text-decoration: none;
-                    border-radius: 6px;
-                    font-weight: bold;
-                    transition: background-color 0.3s;
-                }}
-                .btn:hover {{
-                    background-color: #555;
-                }}
-                .plyr__controls {{
-                    background-color: rgba(26, 26, 26, 0.9) !important;
-                }}
-                .plyr--full-ui input[type=range] {{
-                    color: #e50914 !important;
-                }}
-                .file-preview {{
-                    width: 100%;
-                    max-width: 800px;
-                    height: auto;
-                    max-height: 600px;
-                    border-radius: 8px;
-                    object-fit: contain;
-                    margin-bottom: 20px;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="info">
-                    <h1>{file_name}</h1>
-                    <p>الحجم: {format_file_size(file_size)}</p>
-                    <p id="countdown" class="countdown-timer"></p>
-                </div>
-                {'<div class="player-container">' if is_video or is_audio else ''}
-                {'' if is_image or is_document or (not is_video and not is_audio) else '<video id="player" playsinline controls poster="' + thumbnail_url + '">' if is_video else '<audio id="player" controls>'}
-                {'' if not (is_video or is_audio) else f'<source src="{stream_url}" type="{"video/" if is_video else "audio/"}{file_extension.strip(".")}"</source>'}
-                {'' if not (is_video or is_audio) else '</video>' if is_video else '</audio>'}
-                {'</div>' if is_video or is_audio else ''}
+        return render_template_string("""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ file_name }}</title>
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-image: url('https://upload.wikimedia.org/wikipedia/commons/thumb/0/00/Flag_of_Palestine_%28ISO_3166-2%29.svg/1200px-Flag_of_Palestine_%28ISO_3166-2%29.svg.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            animation: fadein 2s ease-in-out;
+            position: relative;
+        }
+        
+        body::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(5px);
+            z-index: -1;
+        }
 
-                {f'<img src="{stream_url}" class="file-preview" alt="Image Preview">' if is_image else ''}
-                {f'<iframe src="https://docs.google.com/gview?url={urllib.parse.quote_plus(stream_url)}&embedded=true" class="file-preview" style="width:100%; height:500px;" frameborder="0"></iframe>' if is_document and file_extension in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'] else ''}
-                {f'<iframe src="{stream_url}" class="file-preview" style="width:100%; height:500px;" frameborder="0"></iframe>' if is_document and file_extension in ['.pdf', '.txt'] else ''}
+        @keyframes fadein {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
 
-                <div class="button-group">
-                    <a href="{stream_url}?download=true" class="btn">
-                        <i class="fas fa-download"></i>
-                        {get_string('ar', 'download_file')}
-                    </a>
-                    <button class="btn" onclick="copyLink()">
-                        <i class="fas fa-share-alt"></i>
-                        <span>{get_string('ar', 'share_button')}</span>
-                    </button>
-                </div>
-            </div>
+        .player-container {
+            width: 90%;
+            max-width: 900px;
+            background: rgba(0,0,0,0.65);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.7);
+            z-index: 1;
+        }
 
-            <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-            <script>
-                const player = document.getElementById("player");
-                if (player) {{
-                    const plyrPlayer = new Plyr('#player');
-                }}
-                var expire_time = new Date("{expire_time.isoformat()}Z");
-                var countdown_el = document.getElementById("countdown");
+        video, audio, iframe, img {
+            width: 100%;
+            border-radius: 15px;
+        }
 
-                function updateCountdown() {{
-                    var now = new Date();
-                    var remaining = expire_time.getTime() - now.getTime();
-                    
-                    if (remaining <= 0) {{
-                        countdown_el.innerHTML = "{get_string('ar', 'link_expired')}";
-                        clearInterval(interval);
-                        return;
-                    }}
-
-                    var hours = Math.floor((remaining / (1000 * 60 * 60)));
-                    var minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-
-                    var time_left_string = "{get_string('ar', 'time_left_button', time_left='{{time_left}}', minutes='{{minutes}}')}";
-                    var final_string = time_left_string.replace("{{time_left}}", hours).replace("{{minutes}}", minutes);
-                    countdown_el.innerHTML = final_string;
-                }}
-
-                function copyLink() {{
-                    navigator.clipboard.writeText(window.location.href);
-                    alert("تم نسخ الرابط بنجاح!");
-                }}
-
-                updateCountdown();
-                var interval = setInterval(updateCountdown, 1000);
-            </script>
-        </body>
-        </html>
-        """
-        return html_content, 200
+        h2 {
+            text-align: center;
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+            margin-bottom: 15px;
+            text-shadow: 2px 2px 8px #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="player-container">
+        <h2>📽️ {{ file_name }}</h2>
+        {% if file_type in ["video", "audio"] %}
+        <video controls crossorigin playsinline>
+            <source src="/stream_file/{{ file_unique_id }}" type="{{ mime_type }}">
+        </video>
+        {% elif file_type == "image" %}
+        <img src="/stream_file/{{ file_unique_id }}" alt="Image">
+        {% elif file_type == "document" %}
+        <iframe src="/stream_file/{{ file_unique_id }}" style="height: 500px;"></iframe>
+        {% else %}
+        <p style="color:white;">File preview not supported. <a href="/stream_file/{{ file_unique_id }}" style="color:#00ffea;">Download here</a>.</p>
+        {% endif %}
+    </div>
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+    <script>
+        const player = new Plyr('video, audio', { controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen'] });
+    </script>
+</body>
+</html>
+""", file_name=file_name, file_unique_id=file_unique_id, mime_type=mime_type, file_type=file_type)
 
     except Exception as e:
         print(f"An error occurred in get_file: {traceback.format_exc()}")
         return get_string('ar', 'upload_failed', error=e), 400
 
 # ======== مسار تشغيل الفيديو/التحميل (الخادم الوسيط) ========
-@app.route("/stream_file/<file_id>", methods=["GET"])
-def stream_file(file_id):
+@app.route("/stream_file/<file_unique_id>", methods=["GET"])
+def stream_file(file_unique_id):
     try:
-        link_doc = links_collection.find_one({"_id": file_id})
+        print(f"Received stream request for file unique ID: {file_unique_id}")
+        link_doc = links_collection.find_one({"_id": file_unique_id})
+        
         if not link_doc or datetime.now() > link_doc["expire_time"]:
+            print(f"Stream link for file unique ID {file_unique_id} is invalid or expired.")
             return get_string('ar', 'link_invalid'), 400
             
+        file_id = link_doc["file_id"]
         file_info = bot.get_file(file_id)
         telegram_file_url = file_info.file_path
         
@@ -603,7 +530,6 @@ def stream_file(file_id):
         file_name = link_doc.get("file_name", "file")
         
         if is_download_request:
-            # Forcing the browser to download the file instead of streaming it
             headers = {
                 'Content-Disposition': f'attachment; filename="{file_name}"',
                 'Content-Type': 'application/octet-stream'
@@ -613,7 +539,6 @@ def stream_file(file_id):
 
         range_header = request.headers.get('Range', None)
         if range_header:
-            # Handle streaming for video and audio
             r = requests.get(telegram_file_url, headers={"Range": range_header}, stream=True)
             response = Response(r.iter_content(chunk_size=8192), status=r.status_code)
             response.headers.update(r.headers)
@@ -629,7 +554,6 @@ def stream_file(file_id):
     except Exception as e:
         print(f"An error occurred in stream_file: {traceback.format_exc()}")
         return get_string('ar', 'upload_failed', error=e), 400
-
 
 # ======== مسار عرض الصورة المصغرة ========
 @app.route("/get_thumbnail/<thumb_id>", methods=["GET"])
