@@ -506,7 +506,7 @@ def get_file(file_unique_id):
 
 <!-- فيديو الخلفية -->
 <video autoplay muted loop id="bg-video">
-    <source src="https://static.vecteezy.com/system/resources/previews/031/705/655/mp4/free-palestine-save-palestine-palestine-freedom-with-hand-black-background-free-video.mp4" type="video/mp4">
+    <source src="https://static.vecteezy.com/system/resources/previews/022/532/557/mp4/flag-of-palestine-with-a-wavy-effect-due-to-the-wind-free-video.mp4" type="video/mp4">
 </video>
 
 <!-- حاوية المشغل -->
